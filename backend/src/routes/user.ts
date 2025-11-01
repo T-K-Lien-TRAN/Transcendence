@@ -2,12 +2,15 @@ import { FastifyInstance } from "fastify";
 import bcrypt from "bcrypt";
 import speakeasy from "speakeasy";
 import qrcode from "qrcode";
+import fs from "fs";
+import path from "path";
+import { FastifyRequest, FastifyReply } from 'fastify';
 
 export default async function userRoutes(fastify: FastifyInstance) {
   // ----------------------------
   // Register new user
   // ----------------------------
-  fastify.post("/register", async (req, reply) => {
+  fastify.post("/register", async (req: FastifyRequest<{ Body: { username: string; email: string; password: string } }>, reply: FastifyReply) => {
     console.log("Registering user:", req.body);
     const { username, email, password } = req.body as any;
 
@@ -37,53 +40,73 @@ export default async function userRoutes(fastify: FastifyInstance) {
     }
   });
 
-  // ----------------------------
-  // Login user (with optional 2FA)
-  // ----------------------------
-  fastify.post("/login", async (req, reply) => {
-    const { username, password, token } = req.body as any;
+// ----------------------------
+// Login user (with optional 2FA)
+// ----------------------------
+fastify.post("/login", async (req, reply) => {
+  const { username, password, token } = req.body as any;
 
-    if (!username || !password) {
-      return reply.code(400).send({ success: false, error: "Username and password required" });
-    }
+  if (!username || !password) {
+    return reply.code(400).send({ success: false, error: "Username and password required" });
+  }
 
-    try {
-      const user = await fastify.db.get("SELECT * FROM User WHERE username = ?", [username]);
-      if (!user) return reply.code(404).send({ success: false, error: "User not found" });
+  try {
+    const user = await fastify.db.get("SELECT * FROM User WHERE username = ?", [username]);
+    if (!user) return reply.code(404).send({ success: false, error: "User not found" });
 
-      const match = await bcrypt.compare(password, user.password);
-      if (!match) return reply.code(401).send({ success: false, error: "Invalid password" });
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) return reply.code(401).send({ success: false, error: "Invalid password" });
 
-      // If 2FA enabled, verify token
-      if (user.twofa_secret) {
-        if (!token) {
-          return reply.code(403).send({ success: false, require2FA: true, message: "2FA token required" });
-        }
-
-        const verified = speakeasy.totp.verify({
-          secret: user.twofa_secret,
-          encoding: "base32",
-          token,
-        });
-
-        if (!verified) {
-          return reply.code(401).send({ success: false, error: "Invalid 2FA token" });
-        }
+    // If 2FA enabled, verify token
+    if (user.twofa_secret) {
+      if (!token) {
+        return reply.code(403).send({ success: false, require2FA: true, message: "2FA token required" });
       }
 
-      reply.send({
-        success: true,
-        user: {
-          id: user.id,
-          username: user.username,
-          email: user.email,
-          has2FA: !!user.twofa_secret,
-        },
+      const verified = speakeasy.totp.verify({
+        secret: user.twofa_secret,
+        encoding: "base32",
+        token,
       });
-    } catch (err: any) {
-      reply.code(500).send({ success: false, error: err.message });
+
+      if (!verified) {
+        return reply.code(401).send({ success: false, error: "Invalid 2FA token" });
+      }
     }
-  });
+
+    // ✅ Generate JWT after successful password/2FA verification
+    const jwtToken = fastify.jwt.sign({
+      id: user.id,
+      username: user.username,
+    });
+
+    reply.send({
+      success: true,
+      token: jwtToken,   // <-- send JWT to client
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        has2FA: !!user.twofa_secret,
+      },
+    });
+
+  } catch (err: any) {
+    reply.code(500).send({ success: false, error: err.message });
+  }
+});
+    // Setup the authenticate decorator
+    fastify.decorate("authenticate", async function (
+        this: FastifyInstance,
+        req: FastifyRequest,
+        reply: FastifyReply
+    ) {
+        try {
+            await req.jwtVerify(); // checks Authorization header for a valid JWT
+        } catch (err) {
+            reply.code(401).send({ success: false, error: "Unauthorized" });
+        }
+    });
 
   // ----------------------------
   // Generate 2FA secret (setup)
@@ -159,8 +182,8 @@ export default async function userRoutes(fastify: FastifyInstance) {
   // ----------------------------
   // Get user profile by ID (with stats)
   // ----------------------------
-  fastify.get("/user/:id", async (req, reply) => {
-    const { id } = req.params as any;
+  fastify.get("/user/:id", { preHandler: [fastify.authenticate] }, async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply)=> {
+    const { id } = req.params as { id: string };
 
     try {
       const user = await fastify.db.get(
@@ -184,7 +207,7 @@ export default async function userRoutes(fastify: FastifyInstance) {
  // ----------------------------
   // Match complete — update stats + ELO
   // ----------------------------
-  fastify.post("/match/complete", async (req, reply) => {
+  fastify.post("/match/complete", { preHandler: [fastify.authenticate] }, async (req, reply) => {
     const { winnerId, loserId } = req.body as any;
 
     if (!winnerId || !loserId) {
@@ -240,7 +263,7 @@ export default async function userRoutes(fastify: FastifyInstance) {
   // ----------------------------
   // Send friend request
   // ----------------------------
-  fastify.post("/friend", async (req, reply) => {
+  fastify.post("/friend", { preHandler: [fastify.authenticate] }, async (req, reply) => {
     const { userId, friendId } = req.body as any;
 
     if (!userId || !friendId)
@@ -261,7 +284,7 @@ export default async function userRoutes(fastify: FastifyInstance) {
   // ----------------------------
   // Accept friend request
   // ----------------------------
-  fastify.put("/friend/accept", async (req, reply) => {
+  fastify.put("/friend/accept", { preHandler: [fastify.authenticate] }, async (req, reply) => {
     const { userId, friendId } = req.body as any;
 
     try {
@@ -296,7 +319,7 @@ export default async function userRoutes(fastify: FastifyInstance) {
   // ----------------------------
   // List friends
   // ----------------------------
-  fastify.get("/user/:id/friends", async (req, reply) => {
+  fastify.get("/user/:id/friends", { preHandler: [fastify.authenticate] }, async (req, reply) => {
     const { id } = req.params as any;
     try {
       const friends = await fastify.db.all(
@@ -311,4 +334,77 @@ export default async function userRoutes(fastify: FastifyInstance) {
       reply.code(500).send({ success: false, error: err.message });
     }
   });
+
+// ----------------------------
+// Get Match History
+// ----------------------------
+fastify.get("/user/:id/matches", async (req, reply) => {
+  const { id } = req.params as any;
+  try {
+    const matches = await fastify.db.all(
+      "SELECT * FROM MatchHistory WHERE user_id = ? ORDER BY date DESC",
+      [id]
+    );
+    reply.send({ success: true, matches });
+  } catch (err: any) {
+    reply.code(500).send({ success: false, error: err.message });
+  }
+});
+
+// ----------------------------
+// Update Display Name
+// ----------------------------
+fastify.put("/user/displayname", { preHandler: [fastify.authenticate] }, async (req, reply) => {
+  const { nickname } = req.body as any;
+  const userId = req.user.id;
+
+  if (!nickname) return reply.code(400).send({ success: false, error: "Nickname required" });
+
+  try {
+    const existing = await fastify.db.get("SELECT * FROM Player WHERE nickname = ?", [nickname]);
+    if (existing) return reply.code(409).send({ success: false, error: "Nickname already taken" });
+
+    await fastify.db.run("UPDATE Player SET nickname = ? WHERE user_id = ?", [nickname, userId]);
+    reply.send({ success: true, message: "Display name updated" });
+  } catch (err: any) {
+    reply.code(500).send({ success: false, error: err.message });
+  }
+});
+
+// ----------------------------
+// Upload Avatar
+// ----------------------------
+fastify.post(
+  '/user/avatar',
+  { preHandler: [fastify.authenticate] },
+  async (req: FastifyRequest, reply: FastifyReply) => {
+    const data = await req.file();
+    if (!data) {
+      return reply.code(400).send({ success: false, error: 'No file uploaded' });
+    }
+
+    const uploadDir = path.join(__dirname, '../../uploads');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+
+    const filename = `${req.user?.id}_${Date.now()}_${data.filename}`;
+    const filePath = path.join(uploadDir, filename);
+
+    // ✅ New API — use stream or buffer instead of .toFile()
+    const fileBuffer = await data.toBuffer();
+    await fs.promises.writeFile(filePath, fileBuffer);
+
+    const avatarPath = `/uploads/${filename}`;
+    await fastify.db.run('UPDATE User SET avatar = ? WHERE id = ?', [
+      avatarPath,
+      req.user?.id,
+    ]);
+
+    reply.send({ success: true, avatar: avatarPath });
+  }
+);
 }
+
+
+

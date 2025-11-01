@@ -13,30 +13,40 @@
     <button id="tournamentBtn" class="px-4 py-2 bg-green-600 hover:bg-green-700 rounded transition">Tournament</button>
     <button id="playersBtn" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded transition">Players</button>
     <button id="matchesBtn" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 rounded transition">Matches</button>
+    <a href="http://localhost:3000/api/auth/signin" 
+       class="px-4 py-2 bg-red-600 hover:bg-red-700 rounded transition">Sign in</a>
   </header>
 
   <!-- Main content area -->
-  <main id="app" class="w-full max-w-6xl flex flex-col items-center mt-8 p-4"></main>
+  <main id="app" class="w-full max-w-6xl flex flex-col items-center mt-8 p-4">
+    <h1 class="text-3xl font-bold mb-4">Welcome to Transcendence Pong</h1>
+    <p class="text-gray-300 mb-6 text-center">
+      Sign in with your 42 account to join tournaments, track matches, and challenge players.
+    </p>
+    <a href="http://localhost:3000/api/auth/signin" 
+       class="bg-red-600 text-white px-6 py-2 rounded hover:bg-red-700 transition">
+       Sign in with 42
+    </a>
+  </main>
 
   <!-- Footer -->
   <footer class="w-full text-center text-gray-400 py-4 mt-auto border-t border-gray-700">
     Transcendence 42 &copy; 2025 — Game Management Dashboard
   </footer>
 
-  <script type="module" src="./src/main.ts"></script>
-
 <section id="register" class="p-6 max-w-md mx-auto">
-  <h2 class="text-2xl font-bold mb-4 text-center">Register</h2>
+  <h2 class="text-2xl font-bold mb-4 text-center">Sign up</h2>
   <form id="register-form" class="flex flex-col gap-3">
     <input id="username" type="text" placeholder="Username" class="border p-2 rounded" required />
     <input id="email" type="email" placeholder="Email" class="border p-2 rounded" required />
     <input id="password" type="password" placeholder="Password" class="border p-2 rounded" required />
-    <button type="submit" class="bg-blue-600 text-white py-2 rounded hover:bg-blue-700">Register</button>
+    <button type="submit" class="bg-blue-600 text-white py-2 rounded hover:bg-blue-700">Sign up</button>
   </form>
   <p id="register-message" class="mt-2 text-center"></p>
 </section>
 
-<script type="module" src="./src/alias.ts"></script>
+  <script type="module" src="./src/main.ts"></script>
+  <script type="module" src="./src/alias.ts"></script>
 
 </body>
 </html>

@@ -29,6 +29,7 @@ RUN npm install
 # 2️⃣ Copy backend source and config
 COPY backend/src ./src
 COPY backend/tsconfig.json ./
+COPY backend/certs /app/backend/certs
 
 # 3️⃣ Compile backend TypeScript
 RUN npx tsc
@@ -53,8 +54,14 @@ COPY --from=backend-builder /app/backend/dist ./dist
 # 3️⃣ Copy built frontend (already compiled by Vite)
 COPY --from=frontend-builder /app/frontend/dist ./dist/frontend
 
-# 4️⃣ Expose Fastify API port
+# 4️⃣ Copy certs (fix ENOENT)
+COPY backend/certs ./certs
+
+# 5 Create uplads folder
+RUN mkdir -p /app/backend/uploads
+
+# 6 Expose Fastify API port
 EXPOSE 3000
 
-# 5️⃣ Start backend server
+# 7  Start backend server
 CMD ["node", "dist/server.js"]

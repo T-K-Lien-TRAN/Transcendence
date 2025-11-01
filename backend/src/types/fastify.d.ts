@@ -1,9 +1,16 @@
 // backend/src/types/fastify.d.ts
-import "fastify";
-import { Database } from "sqlite";
 
-declare module "fastify" {
+import 'fastify';
+
+declare module 'fastify' {
   interface FastifyInstance {
-    db: Database;
+    jwt: any;
+    authenticate: any;
+    fortytwoOAuth2: any;
+    db:any; // your database plugin
+  }
+
+  interface FastifyRequest {
+    user?: import('./user').User;
   }
 }

@@ -120,3 +120,5 @@ CREATE TABLE Notification (
 INSERT INTO User (username, password, email) VALUES
 ('alice', '1234', 'alice@example.com'),
 ('bob', '5678', 'bob@example.com');
+
+ALTER TABLE User ADD COLUMN avatar TEXT DEFAULT '/uploads/default.png';

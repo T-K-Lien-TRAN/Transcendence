@@ -268,6 +268,17 @@ npm install speakeasy qrcode
 npm install -D @types/speakeasy @types/qrcode
 npm install --save-dev @types/speakeasy @types/qrcode
 
+cd backend
+npm install @fastify/jwt bcrypt
+npm install @fastify/multipart @fastify/static
+npm install @fastify/oauth2
+npm install --save-dev @types/fastify__oauth2
+npm install node-fetch
+npm install @fastify/jwt
+npm install @fastify/oauth2 @fastify/websocket
+npm install -D @types/ws
+
+
 rm backend/data/database.sqlite
 sqlite3 backend/data/database.sqlite < backend/src/db/schema.sql
 sqlite3 backend/data/database.sqlite < migrations/add_user_bio.sql
@@ -275,6 +286,8 @@ sqlite3 backend/data/database.sqlite < migrations/add_user_bio.sql
 curl http://127.0.0.1:3000/api/tables
 curl http://127.0.0.1:3000/api/table/User
 sqlite3 backend/data/database.sqlite "SELECT * FROM User;"
+curl -k https://localhost:3000/api/table/User
+curl -k -v -L https://localhost:3000/api/auth/signin
 
 mkdir certs
 openssl req -x509 -newkey rsa:4096 -nodes -keyout certs/server.key -out certs/server.crt -days 365

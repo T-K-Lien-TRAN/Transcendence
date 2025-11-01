@@ -1,5 +1,5 @@
 // frontend/alias.ts
-const API_BASE = "http://localhost:3000/api";
+const API_BASE = "https://localhost:3000/api";
 
 async function request(endpoint: string, options: RequestInit = {}) {
   const headers = { "Content-Type": "application/json" };
@@ -10,7 +10,7 @@ async function request(endpoint: string, options: RequestInit = {}) {
 }
 
 export const register = (user: { username: string; email: string; password: string }) =>
-  request("/register", { method: "POST", body: JSON.stringify(user) });
+  request("/user/register", { method: "POST", body: JSON.stringify(user) });
 
 document.addEventListener("DOMContentLoaded", () => {
   const form = document.getElementById("register-form") as HTMLFormElement;
