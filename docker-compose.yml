@@ -1,14 +1,10 @@
 services:
   app:
     build: .
+    env_file:
+      - .env
     ports:
       - "3000:3000"
     volumes:
       - ./backend/data:/app/backend/data  # persist SQLite database
     command: node /app/backend/dist/server.js
-    environment:
-      - FORTYTWO_CLIENT_ID=u-s4t2ud-d8e673e16443cd3391a7afb2fe70bb019ed13f10abee28d6a9857964bbb88203
-      - FORTYTWO_CLIENT_SECRET=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
-      - GITHUB_CLIENT_ID=Ov23likX8lu5xvcq2XoM
-      - GITHUB_CLIENT_SECRET=bd325f1d7e311e4d6c3f91ee66ad2a4c156d7432
-      - JWT_SECRET=super_secret_key

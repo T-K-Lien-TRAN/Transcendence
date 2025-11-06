@@ -20,6 +20,9 @@ RUN npm run build
 # ==========================================================
 FROM node:20-alpine AS backend-builder
 
+# Installer OpenSSL pour la génération des certificats
+RUN apk add --no-cache openssl
+
 WORKDIR /app/backend
 
 # 1️⃣ Copy backend package files and install deps
@@ -29,12 +32,19 @@ RUN npm install
 # 2️⃣ Copy backend source and config
 COPY backend/src ./src
 COPY backend/tsconfig.json ./
-COPY backend/certs /app/backend/certs
 
-# 3️⃣ Compile backend TypeScript
+# 3️⃣ Générer les certificats SSL automatiquement
+RUN mkdir -p /app/backend/certs && \
+    openssl req -x509 -newkey rsa:4096 -nodes \
+    -keyout /app/backend/certs/server.key \
+    -out /app/backend/certs/server.crt \
+    -days 365 \
+    -subj "/C=FR/ST=Alpes-Maritimes/L=Nice/O=42 Nice/OU=42 Nice/CN=localhost/emailAddress=transcendence@42nice.fr"
+
+# 4️⃣ Compile backend TypeScript
 RUN npx tsc
 
-# 4️⃣ Copy schema.sql into build output
+# 5️⃣ Copy schema.sql into build output
 RUN mkdir -p dist/db && cp src/db/schema.sql dist/db/
 
 # ==========================================================
@@ -54,14 +64,14 @@ COPY --from=backend-builder /app/backend/dist ./dist
 # 3️⃣ Copy built frontend (already compiled by Vite)
 COPY --from=frontend-builder /app/frontend/dist ./dist/frontend
 
-# 4️⃣ Copy certs (fix ENOENT)
-COPY backend/certs ./certs
+# 4️⃣ Copy generated certs from build stage
+COPY --from=backend-builder /app/backend/certs ./certs
 
-# 5 Create uplads folder
+# 5️⃣ Create uploads folder
 RUN mkdir -p /app/backend/uploads
 
-# 6 Expose Fastify API port
+# 6️⃣ Expose Fastify API port
 EXPOSE 3000
 
-# 7  Start backend server
+# 7️⃣ Start backend server
 CMD ["node", "dist/server.js"]
