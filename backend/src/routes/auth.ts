@@ -116,11 +116,19 @@ export default async function authRoutes(fastify: FastifyInstance) {
 
       const jwt = fastify.jwt.sign({ id: user.id, username: user.username });
       reply.redirect(`/frontend/index.html?token=${jwt}`);
-    } catch (err) {
-      console.error("GitHub OAuth error:", err);
-      reply.code(500).send({ error: "GitHub authentication failed" });
-    }
-  });
+    }  catch (err: any) {
+  console.error("=== GitHub OAuth error START ===");
+  console.error("err:", err);
+  // common places libs put details:
+  if (err.data) console.error("err.data:", err.data);
+  if (err.body) console.error("err.body:", err.body);
+  if (err.message) console.error("err.message:", err.message);
+  if (err.statusCode) console.error("err.statusCode:", err.statusCode);
+  console.error("=== GitHub OAuth error END ===");
+  reply.code(500).send({ error: "GitHub authentication failed", details: err.message ?? "see server logs" });
+}
+});
+
 
 // ---------------------------------------------------------------------------
 // Forgot Password
@@ -203,4 +211,5 @@ resetTokens.delete(token);
 reply.send({ message: "Password successfully reset." });
 });
 }
+
 

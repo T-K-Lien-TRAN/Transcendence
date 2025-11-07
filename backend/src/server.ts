@@ -8,6 +8,7 @@ import { FastifyRequest, FastifyReply } from "fastify";
 import http from "http";
 import fs from "fs";
 import dotenv from "dotenv";
+import fastifyCookie from "@fastify/cookie";
 
 import dbPlugin from "./plugins/db";
 import userRoutes from "./routes/user";
@@ -31,6 +32,17 @@ const fastify = Fastify({
         key: fs.readFileSync(path.join(certsPath, "server.key")),
         cert: fs.readFileSync(path.join(certsPath, "server.crt")),
     },
+});
+
+// register cookie plugin (before fastifyOauth2)
+fastify.register(fastifyCookie, {
+  secret: process.env.COOKIE_SECRET || "dev_cookie_secret",
+  parseOptions: {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: false, // <-- DEV ONLY
+    path: "/",
+  },
 });
 
 // -------------------------
@@ -66,15 +78,6 @@ fastify.register(userRoutes, { prefix: "/api/user" });
 fastify.register(tournamentRoutes, { prefix: "/api/tournament" });
 fastify.register(statsRoutes, { prefix: "/api/stats" });
 fastify.register(notificationRoutes, { prefix: "/api/notifications" });
-
-// ✅ Start server without HTTPS in listen()
-fastify.listen({ port: 3000, host: "localhost" }, (err, address) => {
-    if (err) {
-        console.error(err);
-        process.exit(1);
-    }
-    console.log(`🚀 Server running at ${address}`);
-});
 
 // -------------------------
 // Example DB endpoints

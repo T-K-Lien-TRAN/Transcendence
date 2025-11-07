@@ -27,41 +27,38 @@
     }
 
     // --- PAGE SWITCHING ---
-    function showSection(section) {
-      // hide all known sections
-      const ids = ['signin-section', 'register-section', 'forgot-section', 'reset-section', 'pong-section'];
-      ids.forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.classList.add('hidden');
-      });
-      // show requested section
-      const target = document.getElementById(section);
-      if (target) target.classList.remove('hidden');
-    }
+    // header is persistent, hide/show other sections only
+function showSection(section) {
+  const ids = ['signin-section', 'register-section', 'forgot-section', 'reset-section', 'pong-section'];
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.add('hidden');
+  });
+  const target = document.getElementById(section);
+  if (target) target.classList.remove('hidden');
+}
 
-    document.addEventListener('DOMContentLoaded', () => {
-      // Navbar links
-      document.getElementById('link-signin').addEventListener('click', (e) => {
-        e.preventDefault();
-        showSection('signin-section');
-      });
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('link-signin').addEventListener('click', (e) => {
+    e.preventDefault();
+    // header stays visible automatically
+    showSection('signin-section');
+  });
 
-      document.getElementById('link-signup').addEventListener('click', (e) => {
-        e.preventDefault();
-        showSection('register-section');
-      });
+  document.getElementById('link-signup').addEventListener('click', (e) => {
+    e.preventDefault();
+    showSection('register-section');
+  });
 
-      // Inside Sign-in form -> goto Register
-      document.getElementById('goto-register').addEventListener('click', (e) => {
-        e.preventDefault();
-        showSection('register-section');
-      });
+  document.getElementById('goto-register').addEventListener('click', (e) => {
+    e.preventDefault();
+    showSection('register-section');
+  });
 
-      // Sign-up -> goto Signin
-      document.getElementById('goto-signin').addEventListener('click', (e) => {
-        e.preventDefault();
-        showSection('signin-section');
-      });
+  document.getElementById('goto-signin').addEventListener('click', (e) => {
+    e.preventDefault();
+    showSection('signin-section');
+  });
 
       // Forgot password link -> show forgot section
       document.getElementById('forgot-link').addEventListener('click', (e) => {
@@ -122,7 +119,6 @@ document.getElementById('forgot-form').addEventListener('submit', async (e) => {
         if (forgotEmail) forgotEmail.value = '';
         showSection('signin-section');
       });
-
        // ✅ Detect /reset-password?token=... and show reset form
   const params = new URLSearchParams(window.location.search);
   const token = params.get('token');
@@ -168,6 +164,7 @@ document.getElementById('forgot-form').addEventListener('submit', async (e) => {
       document.getElementById('signinBtn').addEventListener('click', (e) => {
         e.preventDefault();
         // Hide Sign In / Register
+        document.getElementById('header1-section').classList.add('hidden');
         document.getElementById('signin-section').classList.add('hidden');
         document.getElementById('register-section').classList.add('hidden');
         // Show Pong dashboard
@@ -179,7 +176,8 @@ document.getElementById('forgot-form').addEventListener('submit', async (e) => {
 </head>
 
 <body class="bg-gradient-to-br from-gray-100 to-white dark:from-gray-900 dark:to-gray-800 flex flex-col justify-center items-center min-h-screen transition-all duration-500 relative">
-
+<!-- HEADER SECTION -->
+<section id="header1-section"
   <!-- Top Bar -->
   <div class="absolute top-5 left-6 text-xl font-semibold text-gray-800 dark:text-gray-100 select-none">
     Transcendence
@@ -193,7 +191,7 @@ document.getElementById('forgot-form').addEventListener('submit', async (e) => {
     <a href="#" id="link-signup" class="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 transition">Sign up</a>
     <a href="#" id="link-signin" class="px-4 py-2 rounded-lg bg-blue-500 text-white text-sm hover:bg-blue-600 transition">Sign in</a>
   </div>
-
+ </section>
   <!-- SIGN IN SECTION -->
   <section id="signin-section" class="bg-white dark:bg-gray-900 shadow-xl rounded-2xl p-8 w-80 sm:w-96 text-center transition-all duration-500">
     <h2 class="text-2xl font-semibold mb-6 text-gray-800 dark:text-gray-100">Sign in</h2>
@@ -304,6 +302,67 @@ document.getElementById('forgot-form').addEventListener('submit', async (e) => {
   <!-- Scripts at the end for Vite-friendly imports -->
   <script type="module" src="./src/alias.ts"></script>
   <script type="module" src="./src/main.ts"></script>
+
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('token');
+
+    const header1Section = document.getElementById('header1-section');
+    const signinSection = document.getElementById('signin-section');
+    const registerSection = document.getElementById('register-section');
+    const pongSection = document.getElementById('pong-section');
+
+    // Helper: show Pong UI
+    function showPongSection() {
+      if (header1Section) header1Section.classList.add('hidden');
+      if (signinSection) signinSection.classList.add('hidden');
+      if (registerSection) registerSection.classList.add('hidden');
+      if (pongSection) pongSection.classList.remove('hidden');
+    }
+
+    // Helper: show Sign-In UI
+    function showSigninSection() {
+      if (header1Section) header1Section.classList.remove('hidden');
+      if (signinSection) signinSection.classList.remove('hidden');
+      if (registerSection) registerSection.add('hidden');
+      if (pongSection) pongSection.classList.add('hidden');
+    }
+
+    // --- STEP 1: Handle redirect with ?token=... ---
+    if (token) {
+      // Store JWT for session persistence
+      localStorage.setItem('jwt', token);
+
+      // Clean URL (removes ?token=... but keeps the same page)
+      const cleanUrl = window.location.origin + window.location.pathname;
+      window.history.replaceState({}, document.title, cleanUrl);
+
+      // Show Pong section
+      showPongSection();
+      return;
+    }
+
+    // --- STEP 2: Returning user (already signed in) ---
+    const storedToken = localStorage.getItem('jwt');
+    if (storedToken) {
+      // Optionally verify token with backend (recommended for real apps)
+      showPongSection();
+    } else {
+      showSigninSection();
+    }
+
+    // --- STEP 3: Optional logout button handler ---
+    const logoutBtn = document.getElementById('logoutBtn');
+    if (logoutBtn) {
+      logoutBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        localStorage.removeItem('jwt');
+        showSigninSection();
+      });
+    }
+  });
+</script>
 
 </body>
 </html>

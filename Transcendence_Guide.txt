@@ -850,3 +850,83 @@ You’re still writing **TypeScript**, and `.js` only exists *inside* the contai
 
 Would you like me to show exactly how to modify your current `docker-compose.yml` and `Dockerfile` so this Vite-powered TypeScript frontend works seamlessly with your Fastify backend (no `.js` files at all)?
 
+
+
+You create the **Client ID** and **Client Secret** inside your **GitHub account**, but specifically in the **Developer settings** section — not in a repository and not in an organization (unless you *want* the app to belong to an organization).
+
+---
+
+## ✅ Where to create it
+
+### **Go to:**
+
+```
+https://github.com/settings/developers
+```
+
+### Then choose:
+
+**OAuth Apps → New OAuth App**
+
+---
+
+## 🛠️ Steps to create your GitHub OAuth App
+
+1. Sign into your GitHub account.
+2. Visit: [https://github.com/settings/developers](https://github.com/settings/developers)
+3. Click **OAuth Apps**
+4. Press **"New OAuth App"**
+5. Fill the form:
+
+| Field                      | Value                                                                     |
+| -------------------------- | ------------------------------------------------------------------------- |
+| Application name           | Anything (e.g., `My Local App`)                                           |
+| Homepage URL               | `http://localhost:3000`                                                   |
+| Authorization callback URL | **MUST MATCH EXACTLY** → `http://localhost:3000/api/auth/callback/github` |
+
+6. Click **Create OAuth App**
+7. After it's created, you will now see:
+
+   * **Client ID**
+   * A button **"Generate a new client secret"** → click it → copy secret
+
+---
+
+## ✅ Use These in Your Server
+
+Set environment variables:
+
+```bash
+GITHUB_CLIENT_ID=xxxxxxx
+GITHUB_CLIENT_SECRET=yyyyyyy
+```
+
+And use them in your Fastify OAuth setup:
+
+```ts
+client: {
+  id: process.env.GITHUB_CLIENT_ID,
+  secret: process.env.GITHUB_CLIENT_SECRET,
+},
+callbackUri: "http://localhost:3000/api/auth/callback/github",
+```
+
+---
+
+## 🔥 Important
+
+The `Authorization callback URL` **must match exactly** — if one character is different (http vs https, missing slash, wrong port), GitHub will reject the login.
+
+---
+
+## Bonus: Only use **GitHub OAuth App**, not "GitHub Apps" (they are different!)
+
+* **OAuth App** = For login / authentication ✅
+* **GitHub App** = For bots / API installation on repos ❌ (not what you need)
+
+Make sure you are under **OAuth Apps**.
+
+---
+
+If you want, I can walk you through the setup with screenshots — just ask 😊
+
