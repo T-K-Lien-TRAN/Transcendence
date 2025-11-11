@@ -122,3 +122,7 @@ INSERT INTO User (username, password, email) VALUES
 ('bob', '5678', 'bob@example.com');
 
 ALTER TABLE User ADD COLUMN avatar TEXT DEFAULT '/uploads/default.png';
+ALTER TABLE OAuth ADD COLUMN access_token TEXT;
+ALTER TABLE OAuth ADD COLUMN refresh_token TEXT;
+ALTER TABLE OAuth ADD COLUMN expires_at INTEGER;
+
