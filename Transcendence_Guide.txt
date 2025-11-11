@@ -61,6 +61,7 @@ make all
 or 
 cd old_project (old project)
 docker-compose down --volumes --remove-orphans (delete all data in the old project to prevent the error for new project)
+or docker compose down --rmi all
 cd new_project:
 docker system prune -af --volumes
 docker compose build
@@ -346,6 +347,11 @@ sqlite3 ./backend/data/database.sqlite "SELECT * FROM User;"
 sqlite3 ./backend/data/database.sqlite "SELECT * FROM User LIMIT 10;"
 curl -k -v -L https://localhost:3000/api/auth/signin
 curl -k -X POST https://localhost:3000/api/auth/forgot   -H "Content-Type: application/json"   -d '{"email": "lientranthikim@yahoo.com"}'
+Revoke token
+curl -i -X DELETE \
+  -u "THE_SAME_CLIENT_ID:THE_SAME_CLIENT_SECRET" \
+  -H "Accept: application/vnd.github+json" \
+  "https://api.github.com/applications/THE_SAME_CLIENT_ID/tokens/gho_12pyQe0..."
 
 https://developer.mozilla.org/en-US/docs/Web/API/Document
 

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Transcendence - Sign In</title>
+  <title>Transcendence 42</title>
   <script src="https://cdn.tailwindcss.com"></script>
 
   <script>
@@ -142,6 +142,43 @@ document.getElementById('forgot-form').addEventListener('submit', async (e) => {
     }
   });
     });
+
+// OAuth intercept: clear client state before redirect and add prompt params
+document.querySelectorAll('a[data-oauth]').forEach(a => {
+  a.addEventListener('click', (e) => {
+    e.preventDefault();
+    console.log('[auth debug] starting OAuth redirect to', a.href);
+
+    // Clear client tokens so UI won't think user is still logged in
+    localStorage.removeItem('token');
+    localStorage.removeItem('jwt');
+    sessionStorage.removeItem('token');
+    sessionStorage.removeItem('jwt');
+    debugState('cleared tokens before oauth redirect');
+
+    // Build redirect URL
+    const href = new URL(a.href, window.location.origin);
+
+    // 🟢 GitHub
+    if (/github/i.test(href.href)) {
+      href.searchParams.set('prompt', 'consent');
+      href.searchParams.set('allow_signup', 'false');
+    }
+    // 🟢 42 Intra (our /api/auth/signin path or containing "intra.42.fr")
+    else if (/auth\/signin/i.test(href.pathname) || /intra\.42\.fr/i.test(href.href)) {
+      href.searchParams.set('prompt', 'login');
+      href.searchParams.set('access_type', 'offline'); // harmless, standard param
+    }
+    // fallback for others
+    else {
+      href.searchParams.set('prompt', 'login');
+    }
+
+    // Navigate
+    window.location.href = href.toString();
+  });
+});
+
   </script>
 
 </head>
@@ -180,12 +217,12 @@ document.getElementById('forgot-form').addEventListener('submit', async (e) => {
 
       <div class="my-3 text-gray-500 dark:text-gray-400 text-sm">or</div>
 
-     <a href="https://localhost:3000/api/auth/github/login"
+     <a data-oauth href="https://localhost:3000/api/auth/github/login"
    class="w-full flex items-center justify-center gap-2 border border-gray-300 dark:border-gray-700 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition">
   <img src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/github.svg" class="w-5" alt="GitHub logo">
   Sign in with GitHub
 </a>
-      <a href="https://localhost:3000/api/auth/signin"
+      <a data-oauth href="https://localhost:3000/api/auth/signin"
         class="w-full flex items-center justify-center gap-2 border border-gray-300 dark:border-gray-700 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 mt-2 transition">
         <img
           src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='14' fill='%23007ACC'/><text x='50' y='62' font-size='42' text-anchor='middle' fill='white' font-family='system-ui,Arial,sans-serif'>42</text></svg>"
@@ -402,7 +439,7 @@ document.getElementById('forgot-form').addEventListener('submit', async (e) => {
 
     // --- STEP 1: Handle redirect with ?token=... (JWT from login)
     if (token) {
-      sessionStorage.setItem('jwt', token);
+      localStorage.setItem('token', token);
 
       const cleanUrl = window.location.origin + window.location.pathname;
       window.history.replaceState({}, document.title, cleanUrl);
@@ -412,7 +449,7 @@ document.getElementById('forgot-form').addEventListener('submit', async (e) => {
     }
 
     // --- STEP 2: Returning user (already signed in)
-    const storedToken = sessionStorage.getItem('jwt');
+      const storedToken = localStorage.getItem('token');
     if (storedToken) {
       showPongSection();
     } else {
@@ -423,7 +460,9 @@ document.getElementById('forgot-form').addEventListener('submit', async (e) => {
     if (logoutBtn) {
       logoutBtn.addEventListener('click', (e) => {
         e.preventDefault();
-        sessionStorage.removeItem('jwt');
+          localStorage.removeItem('token');
+          sessionStorage.removeItem('token');
+          sessionStorage.removeItem('jwt');
         showSigninSection();
       });
     }
@@ -455,7 +494,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (res.ok && data.token) {
         // Save token and show Pong section
-        sessionStorage.setItem('token', data.token);
+        localStorage.setItem('token', data.token);
         document.getElementById('header1-section').classList.add('hidden');
         document.getElementById('signin-section').classList.add('hidden');
         document.getElementById('register-section').classList.add('hidden');
@@ -468,6 +507,51 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 });
+
+if (logoutBtn) {
+  logoutBtn.addEventListener('click', async (e) => {
+    e.preventDefault();
+
+    try {
+      // 1) Optionally call server to invalidate token (safe if you implement revoke endpoint)
+      const token = localStorage.getItem('token') || sessionStorage.getItem('token') || sessionStorage.getItem('jwt');
+      if (token) {
+        // best-effort: don't crash if server returns non-200
+        try {
+          await fetch('https://localhost:3000/api/auth/logout', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+            body: JSON.stringify({}), // empty body OK
+          });
+        } catch (err) {
+          // ignore network error — we'll still clear client state
+          console.warn('Server logout request failed (ignored):', err);
+        }
+      }
+
+      // 2) Clear all known storage keys (backwards compat)
+      localStorage.removeItem('token');
+      localStorage.removeItem('jwt');
+      sessionStorage.removeItem('token');
+      sessionStorage.removeItem('jwt');
+
+      // 3) Optionally clear other app state (unregister timers, sockets, etc.)
+      // e.g. if you open a WebSocket, close it here: socket?.close();
+
+      // 4) Force UI back to sign-in: either reload or call showSigninSection()
+      // Use reload so every module re-checks token from canonical storage
+      window.location.href = '/frontend/index.html'; // or just window.location.reload();
+
+    } catch (err) {
+      console.error('Logout error:', err);
+      // fallback UI change
+      showSigninSection?.();
+    }
+  }); 
+}
 </script>
 </body>
 </html>
