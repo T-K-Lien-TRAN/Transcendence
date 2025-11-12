@@ -18,10 +18,6 @@ async function request(endpoint: string, options: RequestInit = {}) {
 export const register = (user: { username: string; email: string; password: string }) =>
   request("/register", { method: "POST", body: JSON.stringify(user) });
 
-// ✅ Add this function
-export const fetchPlayers = async (tournament_id: number) => {
-  return request(`/tournament/${tournament_id}/players`);
-};
 export const login = (user: { username: string; password: string; token?: string }) =>
   request("/auth/signin", { method: "POST", body: JSON.stringify(user) })
     .then((data) => {
@@ -61,6 +57,18 @@ export const createTournament = (data: any) =>
 export const joinTournament = (data: any) =>
   request("/tournament/join", { method: "POST", body: JSON.stringify(data) });
 
+export const fetchPlayers = async (tournament_id: number) => {
+  return request(`/tournament/${tournament_id}/players`);
+};
+
 // --- NOTIFICATIONS ---
 export const getNotifications = (userId: number) =>
   request(`/notifications/${userId}`);
+
+// --- Avatar upload helper (multipart) ---
+export const uploadAvatar = async (file: File) => {
+  const form = new FormData();
+  form.append("file", file);
+  // do not set Content-Type — browser will set boundary automatically
+  return request("/user/avatar", { method: "POST", body: form });
+};

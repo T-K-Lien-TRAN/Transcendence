@@ -4,7 +4,7 @@ transcendence-42/
 ├── backend/                                      # ⚙️ Node.js + Fastify + TypeScript backend
 │   ├── data/                                     # 📂 Database and persistent data
 │   │   └── database.sqlite                       # 🗄️ SQLite database file
-│   │
+│   ├── uploads     
 │   ├── src/                                      # 🧠 Backend TypeScript source code
 │   │   ├── server.ts                             # 🚀 Fastify entrypoint: init server, routes, plugins, websockets
 │   │   │
@@ -347,11 +347,27 @@ sqlite3 ./backend/data/database.sqlite "SELECT * FROM User;"
 sqlite3 ./backend/data/database.sqlite "SELECT * FROM User LIMIT 10;"
 curl -k -v -L https://localhost:3000/api/auth/signin
 curl -k -X POST https://localhost:3000/api/auth/forgot   -H "Content-Type: application/json"   -d '{"email": "lientranthikim@yahoo.com"}'
+
 Revoke token
 curl -i -X DELETE \
   -u "THE_SAME_CLIENT_ID:THE_SAME_CLIENT_SECRET" \
   -H "Accept: application/vnd.github+json" \
   "https://api.github.com/applications/THE_SAME_CLIENT_ID/tokens/gho_12pyQe0..."
+
+curl -k -c cookiejar.txt -i -X POST https://localhost:3000/api/user/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"Lien","password":"Lien@1982"}'
+
+# save login JSON
+curl -k -s -X POST https://localhost:3000/api/user/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"Lien","password":"Lien@1982"}' -o login.json
+
+cat login.json
+# if token is in login.json at .token:
+token=$(jq -r '.token' login.json)   # requires jq
+curl -k -H "Authorization: Bearer $token" -i https://localhost:3000/api/user/me
+
 
 https://developer.mozilla.org/en-US/docs/Web/API/Document
 
@@ -1252,3 +1268,101 @@ Backend (Fastify Server)
 | `alias.ts` | Frontend (Browser UI)     | Handles HTML form and user interactions    | `api.ts` functions           |
 
 ---
+
+
+    Pong Section:
+     <img id="nav-avatar" class="h-8 w-8 rounded-full border border-gray-600" src="/uploads/default.png" alt="User avatar">
+     <span id="nav-username" class="hidden md:inline text-sm font-medium text-gray-200"></span>
+     */ 
+
+ <!--
+     <script>
+         async function login(username, password) {
+             const resp = await fetch('/api/user/login', {
+                 method: 'POST',
+                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                 body: JSON.stringify({ username, password })
+             });
+             const data = await resp.json();
+             if (!resp.ok || !data.success) throw new Error(data.error || 'Login failed');
+
+             // store token (simple approach)
+             localStorage.setItem('jwt', data.token);
+             localStorage.setItem('me', JSON.stringify(data.user || {}));
+
+             // notify & refresh UI
+             window.dispatchEvent(new CustomEvent('auth:changed', { detail: { loggedIn: true } }));
+             window.loadCurrentUser?.();
+
+             return data;
+         }
+     </script>
+     <script>
+         document.addEventListener('DOMContentLoaded', () => {
+         (function () {
+             const avatarEl = document.getElementById('nav-avatar');
+             const usernameEl = document.getElementById('nav-username');
+             if (!avatarEl || !usernameEl) return;
+
+             async function loadCurrentUser() {
+                 try {
+                     const token = localStorage.getItem('jwt');
+                     const headers = { 'Accept': 'application/json' };
+                     if (token) headers['Authorization'] = 'Bearer ' + token;
+                     const resp = await fetch('/api/user/me', { method: 'GET', headers });
+                     if (!resp.ok) {
+                         // unauthenticated -> show defaults
+                         usernameEl.textContent = '';
+                         avatarEl.src = new URL('/uploads/default.png', window.location.origin).href;
+                         avatarEl.alt = 'User avatar';
+                         return;
+                     }
+                     const { success, user } = await resp.json();
+                     if (!success || !user) {
+                         usernameEl.textContent = '';
+                         avatarEl.src = new URL('/uploads/default.png', window.location.origin).href;
+                         return;
+                     }
+                     // Username
+                     usernameEl.textContent = user.username ? ('@' + user.username) : '';
+                     usernameEl.classList.remove('hidden'); // if Tailwind hides it by default
+                     usernameEl.classList.remove('md:inline');// optional: remove responsive rule if you want it always visible
+
+                     // Avatar: backend returns either absolute or like "/uploads/xxx"
+                     let avatarPath = user.avatar || '/uploads/default.png';
+                     if (/^https?:\/\//i.test(avatarPath)) {
+                         avatarEl.src = avatarPath;
+                     } else {
+                         // ensure correct origin
+                         avatarEl.src = new URL(avatarPath, window.location.origin).href;
+                     }
+                     avatarEl.alt = (user.username || 'User') + ' avatar';
+                     // fallback on image load error
+                     avatarEl.onerror = () => { avatarEl.src = new URL('/uploads/default.png', window.location.origin).href; };
+                 } catch (err) {
+                     console.warn('Failed to load user:', err);
+                     usernameEl.textContent = '';
+                     avatarEl.src = new URL('/uploads/default.png', window.location.origin).href;
+                 }
+             }
+             // expose for SPA and other modules
+             window.loadCurrentUser = loadCurrentUser;
+             // run at startup
+             loadCurrentUser();
+             // re-run after auth changes (login/logout)
+             window.addEventListener('auth:changed', loadCurrentUser);
+         })();
+     </script>
+ -->
+
+Match History Panel
+                        /*
+                        <!-- User Controls -->
+                        <div class="flex items-center space-x-3">
+                            <!-- User Info -->
+                            <div class="flex items-center space-x-2">
+                                <img id="nav-avatar" class="h-8 w-8 rounded-full border border-gray-600" src="/uploads/default.png" alt="User avatar">
+                                <span id="nav-username" class="hidden md:inline text-sm font-medium text-gray-200"></span>
+                            </div>
+                        </div>
+                        */

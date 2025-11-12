@@ -178,32 +178,60 @@ fastify.post("/login", async (req, reply) => {
       reply.code(500).send({ success: false, error: err.message });
     }
   });
-
+  function normalizeAvatar(avatar: string | null | undefined) {
+        if (!avatar) return "/uploads/default.png";
+        if (/^https?:\/\//i.test(avatar)) return avatar;
+        const filename = path.basename(avatar);
+        return `/uploads/${filename}`;
+   }
   // ----------------------------
   // Get user profile by ID (with stats)
   // ----------------------------
-  fastify.get("/user/:id", { preHandler: [fastify.authenticate] }, async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply)=> {
+  fastify.get("/:id", { preHandler: [fastify.authenticate] }, async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply)=> {
     const { id } = req.params as { id: string };
 
-    try {
-      const user = await fastify.db.get(
-        `SELECT 
+      try {
+          const user = await fastify.db.get(
+              `SELECT 
           u.id, u.username, u.email, u.twofa_secret,
           s.elo, s.matches_played, s.winrate, s.friends
          FROM User u
          LEFT JOIN UserStats s ON u.id = s.user_id
          WHERE u.id = ?`,
-        [id]
+              [id]
+          );
+
+          if (!user) return reply.code(404).send({ success: false, error: "User not found" });
+          const avatar = normalizeAvatar(user.avatar);
+          reply.send({ success: true, user: { ...user, avatar } });
+      } catch (err: any) {
+          reply.code(500).send({ success: false, error: err.message });
+      }
+  });
+  // convenience: get current authenticated user
+fastify.get("/me", { preHandler: [fastify.authenticate] },
+  async (req: FastifyRequest, reply: FastifyReply) => {
+    // adapt this to how you attach the authenticated user id
+      const userId = (req as any).user?.id ?? ((req as any).session?.userId);
+    if (!userId) return reply.code(401).send({ success: false, error: 'Not authenticated' });
+
+    try {
+      const user = await fastify.db.get(
+        `SELECT u.id, u.username, u.email, u.avatar, s.elo, s.matches_played, s.winrate
+         FROM User u
+         LEFT JOIN UserStats s ON u.id = s.user_id
+         WHERE u.id = ?`,
+        [userId]
       );
 
       if (!user) return reply.code(404).send({ success: false, error: "User not found" });
-
-      reply.send({ success: true, user });
+      const avatar = normalizeAvatar(user.avatar);
+        reply.send({ success: true, user: { ...user, avatar } });
     } catch (err: any) {
-      reply.code(500).send({ success: false, error: err.message });
+        reply.code(500).send({ success: false, error: err.message });
     }
-  });
-
+  }
+);
  // ----------------------------
   // Match complete — update stats + ELO
   // ----------------------------
@@ -354,7 +382,7 @@ fastify.get("/user/:id/matches", async (req, reply) => {
 // ----------------------------
 // Update Display Name
 // ----------------------------
-fastify.put("/user/displayname", { preHandler: [fastify.authenticate] }, async (req, reply) => {
+fastify.put("/displayname", { preHandler: [fastify.authenticate] }, async (req, reply) => {
   const { nickname } = req.body as any;
   const userId = req.user.id;
 
@@ -375,7 +403,7 @@ fastify.put("/user/displayname", { preHandler: [fastify.authenticate] }, async (
 // Upload Avatar
 // ----------------------------
 fastify.post(
-  '/user/avatar',
+  '/avatar',
   { preHandler: [fastify.authenticate] },
   async (req: FastifyRequest, reply: FastifyReply) => {
     const data = await req.file();

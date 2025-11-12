@@ -111,23 +111,58 @@ fastify.get<{ Params: { name: string } }>("/api/table/:name", async (request, re
 // -------------------------
 // Static frontend & uploads
 // -------------------------
-const frontendPath = path.join(__dirname, "frontend");
-const uploadsPath = path.join(__dirname, "../uploads");
+function resolveUploadsPath(): string {
+    // try relative to compiled file (src/dist)
+    let candidate = path.join(__dirname, '..', 'uploads');
+    if (fs.existsSync(candidate)) return candidate;
 
-// Ensure uploads folder exists
-if (!fs.existsSync(uploadsPath)) {
-    fs.mkdirSync(uploadsPath, { recursive: true });
+    // fallback to project cwd
+    candidate = path.join(process.cwd(), 'backend', 'uploads');
+    if (fs.existsSync(candidate)) return candidate;
+
+    // last-resort: create it under cwd/backend/uploads
+    candidate = path.join(process.cwd(), 'backend', 'uploads');
+    fs.mkdirSync(candidate, { recursive: true });
+    return candidate;
 }
 
-// Serve uploads manually — no overlap with static
-fastify.get<{ Params: { "*": string } }>("/uploads/*", async (req, reply) => {
-    const filePath = path.join(uploadsPath, req.params["*"]);
-    if (fs.existsSync(filePath)) {
-        return reply.type("application/octet-stream").send(fs.createReadStream(filePath));
+// call this early, BEFORE registering frontend static
+const uploadsPath = resolveUploadsPath();
+const frontendPath = path.join(__dirname, 'frontend');
+
+console.log('DEBUG: uploadsPath =', uploadsPath);
+console.log('DEBUG: default exists =', fs.existsSync(path.join(uploadsPath, 'default.png')));
+
+// register uploads static FIRST (if not already registered)
+fastify.register(fastifyStatic, {
+    root: uploadsPath,
+    prefix: '/uploads/',
+    list: false,
+    decorateReply: false,
+});
+/*
+// temporary debug route to list files (remove later)
+fastify.get('/debug/list-uploads', async (req, reply) => {
+    try {
+        const files = fs.readdirSync(uploadsPath);
+        return reply.send({ ok: true, uploadsPath, files });
+    } catch (err: any) {
+        return reply.code(500).send({ ok: false, error: err.message });
     }
-    return reply.code(404).send({ error: "File not found" });
 });
 
+// after all registrations (still before listen) print routes
+console.log('DEBUG: registered routes:\n', fastify.printRoutes());
+// DEBUG: prints all registered routes at runtime
+fastify.get('/debug/print-routes', async (req, reply) => {
+    try {
+        const routes = fastify.printRoutes();
+        return reply.type('text/plain').send(routes);
+    } catch (err: any) {
+        return reply.code(500).send({ ok: false, error: err.message });
+    }
+});
+*/
 // Serve built frontend
 fastify.register(fastifyStatic, {
     root: frontendPath,
@@ -137,6 +172,7 @@ fastify.register(fastifyStatic, {
 
 // SPA fallback (after static)
 fastify.setNotFoundHandler((req, reply) => {
+    const url = req.url || "";
     if (req.url.startsWith("/api") || req.url.startsWith("/uploads")) {
         return reply.code(404).send({ error: "Not found" });
     }
@@ -145,7 +181,6 @@ fastify.setNotFoundHandler((req, reply) => {
     if (fs.existsSync(indexPath)) {
         return reply.type("text/html").send(fs.readFileSync(indexPath));
     }
-
     reply.code(404).send({ error: "Frontend not found" });
 });
 
