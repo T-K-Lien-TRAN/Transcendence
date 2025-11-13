@@ -9,10 +9,47 @@
     .hidden-section { display: none; }
   </style>
   <script>
+    (function migrateTokenKey(){
+    try {
+        const t = localStorage.getItem('token');
+        if (t && !localStorage.getItem('jwt')) {
+        localStorage.setItem('jwt', t);
+        console.info('[auth] migrated localStorage.token -> localStorage.jwt');
+        }
+    } catch (e) { console.warn('token migration error', e); }
+    })();
+</script>
+
+  <script>
+    (function(){
+    try {
+        const url = new URL(window.location.href);
+        const t = url.searchParams.get('token');
+        if (!t) return;
+        localStorage.setItem('jwt', t);
+        url.searchParams.delete('token');
+        window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
+
+        (async ()=>{
+        try {
+            const r = await fetch('/api/user/me', { headers: { 'Authorization': 'Bearer ' + t }});
+            if (r.ok) {
+            const payload = await r.json();
+            if (payload?.success && payload.user) {
+                localStorage.setItem('me', JSON.stringify(payload.user));
+                window.dispatchEvent(new CustomEvent('auth:changed', { detail: { loggedIn: true }}));
+            }
+            }
+        } catch(e){ console.warn(e); }
+        })();
+    } catch(e){ console.warn(e); }
+    })();
+</script>
+  <script>
   // Tiny API helper used across the page (keeps Authorization header)
     const API_BASE = "https://localhost:3000/api";
     async function apiRequest(endpoint, opts = {}) {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('jwt');
       const headers = opts.body instanceof FormData ? {} : { "Content-Type": "application/json" };
       if (token) headers['Authorization'] = `Bearer ${token}`;
       const res = await fetch(`${API_BASE}${endpoint}`, { ...opts, headers });
@@ -500,7 +537,7 @@ document.querySelectorAll('a[data-oauth]').forEach(a => {
             console.log('Navigating to Home section');
         });
     </script>
-
+<!--
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             const params = new URLSearchParams(window.location.search);
@@ -562,8 +599,10 @@ document.querySelectorAll('a[data-oauth]').forEach(a => {
             }
 
             // --- STEP 1: Handle redirect with ?token=... (JWT from login)
-            if (token) {
-                localStorage.setItem('token', token);
+            const params = new URLSearchParams(window.location.search);
+            const qtoken = params.get('token');
+            if (qtoken) {
+                localStorage.setItem('jwt', qtoken);
 
                 const cleanUrl = window.location.origin + window.location.pathname;
                 window.history.replaceState({}, document.title, cleanUrl);
@@ -573,8 +612,8 @@ document.querySelectorAll('a[data-oauth]').forEach(a => {
             }
 
             // --- STEP 2: Returning user (already signed in)
-            const storedToken = localStorage.getItem('token');
-            if (storedToken) {
+            const storedJwt = localStorage.getItem('jwt');
+            if (storedJwt) {
                 showPongSection();
             } else {
                 showSigninSection();
@@ -584,6 +623,7 @@ document.querySelectorAll('a[data-oauth]').forEach(a => {
             if (logoutBtn) {
                 logoutBtn.addEventListener('click', (e) => {
                     e.preventDefault();
+                    localStorage.removeItem('jwt');
                     localStorage.removeItem('token');
                     sessionStorage.removeItem('token');
                     sessionStorage.removeItem('jwt');
@@ -592,6 +632,97 @@ document.querySelectorAll('a[data-oauth]').forEach(a => {
             }
         });
     </script>
+  -->
+    <script>
+        (function bootstrapAuthAndUI() {
+        // Helper UI toggles (no-ops if elements missing)
+        const header1Section = document.getElementById('header1-section');
+        const signinSection = document.getElementById('signin-section');
+        const registerSection = document.getElementById('register-section');
+        const pongSection = document.getElementById('pong-section');
+
+        function showPongSection() {
+            console.log('[auth] showPongSection()');
+            if (header1Section) header1Section.classList.add('hidden');
+            if (signinSection) signinSection.classList.add('hidden');
+            if (registerSection) registerSection.classList.add('hidden');
+            if (pongSection) pongSection.classList.remove('hidden');
+        }
+        function showSigninSection() {
+            console.log('[auth] showSigninSection()');
+            if (header1Section) header1Section.classList.remove('hidden');
+            if (signinSection) signinSection.classList.remove('hidden');
+            if (registerSection) registerSection.classList.add('hidden');
+            if (pongSection) pongSection.classList.add('hidden');
+        }
+
+        // read token helpers
+        function getJwtFromUrl() {
+            try {
+            const p = new URLSearchParams(window.location.search);
+            return p.get('token');
+            } catch (e) {
+            console.warn('[auth] getJwtFromUrl error', e);
+            return null;
+            }
+        }
+        function getJwtFromStorage() {
+            return localStorage.getItem('jwt') || sessionStorage.getItem('jwt') || localStorage.getItem('token') || sessionStorage.getItem('token') || null;
+        }
+
+        // 1) Try URL query first (this should be early and quick)
+        const urlToken = getJwtFromUrl();
+        if (urlToken) {
+            console.log('[auth] found token in URL:', urlToken.slice(0,6) + '...'); // don't print full token
+            // store canonical location
+            localStorage.setItem('jwt', urlToken);
+            // clean the URL
+            const cleanUrl = window.location.origin + window.location.pathname;
+            try { window.history.replaceState({}, document.title, cleanUrl); } catch(e){/* ignore */ }
+            showPongSection();
+            return;
+        }
+
+        // 2) Try storage (landing page may have written it already)
+        const existing = getJwtFromStorage();
+        if (existing) {
+            console.log('[auth] found token in storage:', existing.slice(0,6) + '...');
+            showPongSection();
+            return;
+        }
+
+        // 3) If opened as an OAuth popup landing that used window.opener.postMessage,
+        // listen for a message for a short period.
+        let messageHandled = false;
+        function messageListener(ev) {
+            try {
+            // adapt origin check as needed; accept any for debug, then lock down
+            // if (ev.origin !== window.location.origin) return;
+            const data = ev.data;
+            if (data && (data.token || data.jwt)) {
+                const t = data.token || data.jwt;
+                console.log('[auth] received token via postMessage:', (''+t).slice(0,6) + '...');
+                localStorage.setItem('jwt', t);
+                messageHandled = true;
+                window.removeEventListener('message', messageListener);
+                showPongSection();
+            }
+            } catch (e) { console.warn('messageListener error', e); }
+        }
+        window.addEventListener('message', messageListener, false);
+
+        // wait a tiny bit for possible message senders, then decide
+        setTimeout(() => {
+            if (messageHandled) return;
+            // final fallback: no token found -> show sign-in
+            console.log('[auth] no token found in url/storage/postMessage -> showing sign-in');
+            showSigninSection();
+            // remove listener to avoid leaks
+            window.removeEventListener('message', messageListener);
+        }, 600); // 600ms wait — short but enough for popup postMessage
+        })();
+    </script>
+
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             const signinForm = document.getElementById('signin-form');
@@ -961,12 +1092,12 @@ document.querySelectorAll('a[data-oauth]').forEach(a => {
                 }
             });
         });
-    </script>
-   
+    </script>   
     <!-- Login function (example) -->
+    <!-- 
     <script>
         async function login(username, password) {
-            const resp = await fetch('/api/user/login', {
+            const resp = await fetch('/api/auth/signin', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
                 body: JSON.stringify({ username, password })
@@ -984,8 +1115,44 @@ document.querySelectorAll('a[data-oauth]').forEach(a => {
 
             return data;
         }
-    </script>
+    </script>  
+    -->
+    <script>
+    async function login({ username, password, otpToken = undefined, type = 'local' }) {
+        let url = '/api/auth/signin';  // Default to local login
 
+        if (type === 'github') {
+            url = '/api/auth/callback/github';
+        } else if (type === 'fortytwo') {
+            url = '/api/auth/callback/42';
+        }
+
+        // For OAuth-based logins (GitHub, 42 Intra), the token would already be handled via the callback
+        const body = type === 'local' 
+            ? JSON.stringify({ username, password, token: otpToken })
+            : undefined;
+
+        const resp = await fetch(url, {
+            method: type === 'local' ? 'POST' : 'GET',  // POST for local, GET for OAuth callbacks
+            headers: { 'Content-Type': 'application/json' },
+            body
+        });
+
+        const data = await resp.json();
+        if (!resp.ok || !data.success) throw new Error(data.error || 'Login failed');
+
+        // Store JWT and user data in localStorage
+        localStorage.setItem('jwt', data.token);
+        localStorage.setItem('me', JSON.stringify(data.user || {}));
+
+        // Refresh the UI
+        window.dispatchEvent(new CustomEvent('auth:changed', { detail: { loggedIn: true } }));
+        window.loadCurrentUser?.();
+
+        return data;
+    }
+    </script>
+  
     <!-- Load current user and show username to the right of avatar -->
     <script>
         document.addEventListener('DOMContentLoaded', () => {

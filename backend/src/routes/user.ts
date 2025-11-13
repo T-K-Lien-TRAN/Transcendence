@@ -1,18 +1,22 @@
-import { FastifyInstance } from "fastify";
+import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import bcrypt from "bcrypt";
 import speakeasy from "speakeasy";
 import qrcode from "qrcode";
 import fs from "fs";
 import path from "path";
-import { FastifyRequest, FastifyReply } from 'fastify';
+import fetch from 'node-fetch';
+
+interface OAuthRequestQuery {
+  token: string;
+}
 
 export default async function userRoutes(fastify: FastifyInstance) {
+
   // ----------------------------
   // Register new user
   // ----------------------------
   fastify.post("/register", async (req: FastifyRequest<{ Body: { username: string; email: string; password: string } }>, reply: FastifyReply) => {
-    console.log("Registering user:", req.body);
-    const { username, email, password } = req.body as any;
+    const { username, email, password } = req.body;
 
     if (!username || !password || !email) {
       return reply.code(400).send({ success: false, error: "All fields are required" });
@@ -40,74 +44,133 @@ export default async function userRoutes(fastify: FastifyInstance) {
     }
   });
 
-// ----------------------------
-// Login user (with optional 2FA)
-// ----------------------------
-fastify.post("/login", async (req, reply) => {
-  const { username, password, token } = req.body as any;
+  // ----------------------------
+  // Generic Login Route (handles local login + OAuth for GitHub/42)
+  // ----------------------------
+  fastify.post("/api/auth/signin", async (req: FastifyRequest, reply: FastifyReply) => {
+    const { username, password, token, type } = req.body as { username: string, password: string, token?: string, type: string };
 
-  if (!username || !password) {
-    return reply.code(400).send({ success: false, error: "Username and password required" });
-  }
-
-  try {
-    const user = await fastify.db.get("SELECT * FROM User WHERE username = ?", [username]);
-    if (!user) return reply.code(404).send({ success: false, error: "User not found" });
-
-    const match = await bcrypt.compare(password, user.password);
-    if (!match) return reply.code(401).send({ success: false, error: "Invalid password" });
-
-    // If 2FA enabled, verify token
-    if (user.twofa_secret) {
-      if (!token) {
-        return reply.code(403).send({ success: false, require2FA: true, message: "2FA token required" });
+    if (type === 'local') {
+      // Local login: username + password (optional 2FA)
+      if (!username || !password) {
+        return reply.code(400).send({ success: false, error: "Username and password required" });
       }
 
-      const verified = speakeasy.totp.verify({
-        secret: user.twofa_secret,
-        encoding: "base32",
-        token,
-      });
+      try {
+        const user = await fastify.db.get("SELECT * FROM User WHERE username = ?", [username]);
+        if (!user) return reply.code(404).send({ success: false, error: "User not found" });
 
-      if (!verified) {
-        return reply.code(401).send({ success: false, error: "Invalid 2FA token" });
-      }
-    }
+        const match = await bcrypt.compare(password, user.password);
+        if (!match) return reply.code(401).send({ success: false, error: "Invalid password" });
 
-    // ✅ Generate JWT after successful password/2FA verification
-    const jwtToken = fastify.jwt.sign({
-      id: user.id,
-      username: user.username,
-    });
+        // If 2FA is enabled, verify the token
+        if (user.twofa_secret) {
+          if (!token) {
+            return reply.code(403).send({ success: false, require2FA: true, message: "2FA token required" });
+          }
 
-    reply.send({
-      success: true,
-      token: jwtToken,   // <-- send JWT to client
-      user: {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        has2FA: !!user.twofa_secret,
-      },
-    });
+          const verified = speakeasy.totp.verify({
+            secret: user.twofa_secret,
+            encoding: "base32",
+            token,
+          });
 
-  } catch (err: any) {
-    reply.code(500).send({ success: false, error: err.message });
-  }
-});
-    // Setup the authenticate decorator
-    fastify.decorate("authenticate", async function (
-        this: FastifyInstance,
-        req: FastifyRequest,
-        reply: FastifyReply
-    ) {
-        try {
-            await req.jwtVerify(); // checks Authorization header for a valid JWT
-        } catch (err) {
-            reply.code(401).send({ success: false, error: "Unauthorized" });
+          if (!verified) {
+            return reply.code(401).send({ success: false, error: "Invalid 2FA token" });
+          }
         }
-    });
 
+        // Generate JWT after successful password/2FA verification
+        const jwtToken = fastify.jwt.sign({
+          id: user.id,
+          username: user.username,
+        });
+
+        reply.send({
+          success: true,
+          token: jwtToken,
+          user: {
+            id: user.id,
+            username: user.username,
+            email: user.email,
+            has2FA: !!user.twofa_secret,
+          },
+        });
+
+      } catch (err: any) {
+        reply.code(500).send({ success: false, error: err.message });
+      }
+    } else if (type === 'github' || type === 'fortytwo') {
+      // OAuth login: GitHub or 42 Intra
+      try {
+        const { token } = req.query as OAuthRequestQuery; // Explicitly typing req.query
+
+        if (!token) {
+          return reply.code(400).send({ success: false, error: "Token is required for OAuth login" });
+        }
+
+        // Fetch user info from GitHub or 42 Intra depending on the type
+        const user = await fetchUserFromOAuth(type, token);
+        if (!user) return reply.code(404).send({ success: false, error: "User not found" });
+
+        // Generate JWT after successful OAuth authentication
+        const jwtToken = fastify.jwt.sign({
+          id: user.id,
+          username: user.username,
+        });
+
+        reply.send({
+          success: true,
+          token: jwtToken,
+          user: {
+            id: user.id,
+            username: user.username,
+            email: user.email,
+          },
+        });
+
+      } catch (err: any) {
+        reply.code(500).send({ success: false, error: err.message });
+      }
+    } else {
+      return reply.code(400).send({ success: false, error: "Invalid login type" });
+    }
+  });
+
+  // Helper function to fetch user information from OAuth services (GitHub/42)
+  async function fetchUserFromOAuth(type: string, token: string) {
+    try {
+      let user;
+
+      if (type === 'githubOAuth2') {
+        // Fetch GitHub user info
+        const githubResponse = await fetch('https://api.github.com/user', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        user = await githubResponse.json();
+      } else if (type === 'fortyTwoOAuth2') {
+        // Fetch 42 Intra user info
+        const intraResponse = await fetch('https://api.intra.42.fr/v2/me', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        user = await intraResponse.json();
+      }
+
+      return user;
+    } catch (err: any) {
+      // Handle error here by throwing it, Fastify will automatically handle it
+      throw new Error(`Failed to fetch user from ${type}: ${err.message}`);
+    }
+  }
+
+  // Authentication Middleware (JWT Verification)
+  fastify.decorate("authenticate", async function (this: FastifyInstance, req: FastifyRequest, reply: FastifyReply) {
+    try {
+      await req.jwtVerify();  // This checks the Authorization header for a valid JWT
+    } catch (err) {
+      reply.code(401).send({ success: false, error: "Unauthorized" });
+    }
+  });
   // ----------------------------
   // Generate 2FA secret (setup)
   // ----------------------------
@@ -433,6 +496,3 @@ fastify.post(
   }
 );
 }
-
-
-

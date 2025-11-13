@@ -84,7 +84,6 @@ export default async function authRoutes(fastify: FastifyInstance) {
     startRedirectPath: "/api/auth/github/login",
     callbackUri: "https://localhost:3000/api/auth/callback/github",
   });
-
   // ====== 42 Callback ======
   fastify.get("/api/auth/callback/42", async (req: FastifyRequest, reply: FastifyReply) => {
     try {
@@ -114,7 +113,6 @@ export default async function authRoutes(fastify: FastifyInstance) {
 
       // store tokens in OAuth table
       await upsertOAuth(fastify, user.id, "42", accessToken, refreshToken, expiresAt);
-
       const jwt = fastify.jwt.sign({ id: user.id, username: user.username });
       reply.redirect(`/frontend/index.html?token=${jwt}`);
     } catch (err) {
@@ -168,7 +166,6 @@ export default async function authRoutes(fastify: FastifyInstance) {
 
       // store tokens in OAuth table
       await upsertOAuth(fastify, user.id, "github", accessToken, refreshToken, expiresAt);
-
       const jwt = fastify.jwt.sign({ id: user.id, username: user.username });
       reply.redirect(`/frontend/index.html?token=${jwt}`);
     } catch (err: any) {
@@ -286,43 +283,52 @@ export default async function authRoutes(fastify: FastifyInstance) {
   });
 
   // ---------------------------------------------------------------------------
-  // Login (local)
-  // ---------------------------------------------------------------------------
+  // Login
+  // ---------------------------------------------------------------------------  
   fastify.post("/api/auth/signin", async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const { user, password } = request.body as { user?: string; password?: string };
+      // accept either { user, password } or { username, password }
+      const body = request.body as any || {};
+      const suppliedUser = body.user || body.username;
+      const password = body.password as string | undefined;
 
-      if (!user || !password) {
-        return reply.code(400).send({ error: "Username and password required" });
+      if (!suppliedUser || !password) {
+        return reply.code(400).send({ success: false, error: "Username and password required" });
       }
 
-      // find by username or email
+      // find by username or email (keep existing logic)
       const dbUser =
-        (await fastify.db.get("SELECT * FROM User WHERE username = ?", [user])) ||
-        (await fastify.db.get("SELECT * FROM User WHERE email = ?", [user]));
+        (await fastify.db.get("SELECT * FROM User WHERE username = ?", [suppliedUser])) ||
+        (await fastify.db.get("SELECT * FROM User WHERE email = ?", [suppliedUser]));
 
       if (!dbUser) {
-        return reply.code(401).send({ error: "Invalid credentials" });
+        return reply.code(401).send({ success: false, error: "Invalid credentials" });
       }
 
       const hashed = dbUser.password || ""; // ensure string
       const valid = await bcrypt.compare(password, hashed);
       if (!valid) {
-        return reply.code(401).send({ error: "Invalid credentials" });
+        return reply.code(401).send({ success: false, error: "Invalid credentials" });
       }
 
-      const jwt = fastify.jwt.sign({ id: dbUser.id, username: dbUser.username });
-      return reply.send({ token: jwt });
+      // create JWT (include minimal data)
+      const jwtToken = fastify.jwt.sign({ id: dbUser.id, username: dbUser.username });
+
+      // reply with full object so frontend can store token + cached user
+      return reply.send({
+        success: true,
+        token: jwtToken,
+        user: { id: dbUser.id, username: dbUser.username, email: dbUser.email ?? null }
+      });
     } catch (err: unknown) {
       if (err instanceof Error) {
         fastify.log.error(err, "signin error");
       } else {
         fastify.log.error({ thrown: err }, "signin error (non-error)");
       }
-      return reply.code(500).send({ error: "Internal server error" });
+      return reply.code(500).send({ success: false, error: "Internal server error" });
     }
   });
-
   // ---------------------------------------------------------------------------
   // Forgot Password
   // ---------------------------------------------------------------------------

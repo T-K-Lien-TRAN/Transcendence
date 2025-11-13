@@ -1268,8 +1268,17 @@ Backend (Fastify Server)
 | `alias.ts` | Frontend (Browser UI)     | Handles HTML form and user interactions    | `api.ts` functions           |
 
 ---
+when I sign in with github, token from Application local Storage is: token:"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6NCwidXNlcm5hbWUiOiJMaWVuIiwiaWF0IjoxNzYzMDIyMTg4fQ.WmCAeeqhzGmY97qNMRZbJXyW984c9_dwpbPvq0QvnwM", but in the database is: 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, why there is a difference?
 
+They're different because they are two completely different tokens used for different purposes.
 
+Short answer
+
+eyJ... (the .-separated string in localStorage) — that's your server-issued JWT. It's used by your frontend to authenticate requests to your backend (e.g. /api/user/me).
+
+gho_fi5Ru5... (value in the DB) — that's the GitHub access token your server received from GitHub and stored in the OAuth table. It's used by your backend to call GitHub's APIs on behalf of the user.
+
+They should be different — that's expected and correct.
     Pong Section:
      <img id="nav-avatar" class="h-8 w-8 rounded-full border border-gray-600" src="/uploads/default.png" alt="User avatar">
      <span id="nav-username" class="hidden md:inline text-sm font-medium text-gray-200"></span>
