@@ -4,7 +4,7 @@ transcendence-42/
 ├── backend/                                      # ⚙️ Node.js + Fastify + TypeScript backend
 │   ├── data/                                     # 📂 Database and persistent data
 │   │   └── database.sqlite                       # 🗄️ SQLite database file
-│   │
+│   ├── uploads     
 │   ├── src/                                      # 🧠 Backend TypeScript source code
 │   │   ├── server.ts                             # 🚀 Fastify entrypoint: init server, routes, plugins, websockets
 │   │   │
@@ -40,6 +40,7 @@ transcendence-42/
 │   │
 │   ├── src/                                      # 🎨 Frontend source files
 │   │   ├── style.css                             # TailwindCSS imports + custom styles
+│   │   ├── home.ts 
 │   │   ├── main.ts                               # SPA router (hash-based navigation)
 │   │   ├── pong.ts                               # Pong game logic + canvas rendering
 │   │   ├── tournament.ts                         # Tournament UI, bracket rendering, join/create logic
@@ -347,11 +348,34 @@ sqlite3 ./backend/data/database.sqlite "SELECT * FROM User;"
 sqlite3 ./backend/data/database.sqlite "SELECT * FROM User LIMIT 10;"
 curl -k -v -L https://localhost:3000/api/auth/signin
 curl -k -X POST https://localhost:3000/api/auth/forgot   -H "Content-Type: application/json"   -d '{"email": "lientranthikim@yahoo.com"}'
+
 Revoke token
 curl -i -X DELETE \
   -u "THE_SAME_CLIENT_ID:THE_SAME_CLIENT_SECRET" \
   -H "Accept: application/vnd.github+json" \
   "https://api.github.com/applications/THE_SAME_CLIENT_ID/tokens/gho_12pyQe0..."
+
+curl -k -c cookiejar.txt -i -X POST https://localhost:3000/api/user/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"Lien","password":"Lien@1982"}'
+
+# save login JSON
+curl -k -s -X POST https://localhost:3000/api/user/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"Lien","password":"Lien@1982"}' -o login.json
+
+cat login.json
+# if token is in login.json at .token:
+token=$(jq -r '.token' login.json)   # requires jq
+curl -k -H "Authorization: Bearer $token" -i https://localhost:3000/api/user/me
+
+F12->Console:
+Verify that the JWT token is in localStorage:
+console.log(localStorage.getItem('jwt'));
+
+Check if localStorage.getItem('me') contains the user data:
+console.log('User in localStorage:', JSON.parse(localStorage.getItem('me')));
+
 
 https://developer.mozilla.org/en-US/docs/Web/API/Document
 
@@ -1252,3 +1276,15 @@ Backend (Fastify Server)
 | `alias.ts` | Frontend (Browser UI)     | Handles HTML form and user interactions    | `api.ts` functions           |
 
 ---
+when I sign in with github, token from Application local Storage is: token:"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6NCwidXNlcm5hbWUiOiJMaWVuIiwiaWF0IjoxNzYzMDIyMTg4fQ.WmCAeeqhzGmY97qNMRZbJXyW984c9_dwpbPvq0QvnwM", but in the database is: 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, why there is a difference?
+
+They're different because they are two completely different tokens used for different purposes.
+
+Short answer
+
+eyJ... (the .-separated string in localStorage) — that's your server-issued JWT. It's used by your frontend to authenticate requests to your backend (e.g. /api/user/me).
+
+gho_fi5Ru5... (value in the DB) — that's the GitHub access token your server received from GitHub and stored in the OAuth table. It's used by your backend to call GitHub's APIs on behalf of the user.
+
+They should be different — that's expected and correct.
+   

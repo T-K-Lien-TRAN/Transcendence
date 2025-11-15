@@ -7,4 +7,5 @@ services:
       - "3000:3000"
     volumes:
       - ./backend/data:/app/backend/data  # persist SQLite database
+      - ./backend/uploads:/app/backend/uploads
     command: node /app/backend/dist/server.js

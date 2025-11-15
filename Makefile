@@ -14,6 +14,14 @@ all:
 	@echo "$(BLUE)🔄 Starting containers...$(NC)"
 	@docker compose up -d
 	@echo "$(GREEN)✓ $(NAME) is up and running! https://localhost:3000$(NC)"
+up: 
+	@docker compose up -d
+
+down:
+	@docker compose down
+
+stop:
+	@docker compose stop
 
 clean:
 	@echo "$(YELLOW)🛑 Stopping containers...$(NC)"
@@ -27,4 +35,4 @@ fclean: clean
 
 re: fclean all
 
-.PHONY: all clean fclean re
+.PHONY: all up down stop clean fclean re
