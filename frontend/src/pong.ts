@@ -1,6 +1,6 @@
 import { GameState } from "./types";
 
-export function showHome(container: HTMLElement) {
+export function showGame(container: HTMLElement) {
   const canvas = document.createElement("canvas");
   canvas.width = 500;
   canvas.height = 300;

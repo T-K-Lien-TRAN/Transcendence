@@ -40,6 +40,7 @@ transcendence-42/
 │   │
 │   ├── src/                                      # 🎨 Frontend source files
 │   │   ├── style.css                             # TailwindCSS imports + custom styles
+│   │   ├── home.ts 
 │   │   ├── main.ts                               # SPA router (hash-based navigation)
 │   │   ├── pong.ts                               # Pong game logic + canvas rendering
 │   │   ├── tournament.ts                         # Tournament UI, bracket rendering, join/create logic

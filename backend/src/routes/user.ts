@@ -207,7 +207,43 @@ export default async function userRoutes(fastify: FastifyInstance) {
           reply.code(500).send({ success: false, error: err.message });
       }
   });
-  // convenience: get current authenticated user
+ // convenience: get current authenticated user
+fastify.get("/me", { preHandler: [fastify.authenticate] },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+
+        const userId = (req as any).user?.id ?? ((req as any).session?.userId);
+        if (!userId) return reply.code(401).send({ success: false, error: 'Not authenticated' });
+        try {
+            const user = await fastify.db.get(
+                `SELECT 
+                    u.id,
+                    u.username,
+                    u.email,
+                    u.avatar,
+                    p.nickname,
+                    p.elo,
+                    p.rank,
+                    us.matches_played,
+                    us.winrate
+                    FROM User u
+                    LEFT JOIN Player p 
+                    ON u.id = p.user_id 
+                    AND p.tournament_id = 1       -- ← choose your default tournament
+                    LEFT JOIN UserStats us 
+                    ON u.id = us.user_id
+                    WHERE u.id = ?`,
+                [userId]
+            );
+            if (!user) return reply.code(404).send({ success: false, error: "User not found" });
+
+            const avatar = normalizeAvatar(user.avatar);
+            reply.send({ success: true, user: { ...user, avatar } });
+        } catch (err: any) {
+            reply.code(500).send({ success: false, error: err.message });
+        }
+    }
+);
+/*
 fastify.get("/me", { preHandler: [fastify.authenticate] },
   async (req: FastifyRequest, reply: FastifyReply) => {
     // adapt this to how you attach the authenticated user id
@@ -231,6 +267,7 @@ fastify.get("/me", { preHandler: [fastify.authenticate] },
     }
   }
 );
+*/
  // ----------------------------
   // Match complete — update stats + ELO
   // ----------------------------
@@ -381,7 +418,8 @@ fastify.get("/user/:id/matches", async (req, reply) => {
 // ----------------------------
 // Update Display Name
 // ----------------------------
-fastify.put("/displayname", { preHandler: [fastify.authenticate] }, async (req, reply) => {
+/*
+    fastify.put("/displayname", { preHandler: [fastify.authenticate] }, async (req, reply) => {
   const { nickname } = req.body as any;
   const userId = req.user.id;
 
@@ -390,14 +428,66 @@ fastify.put("/displayname", { preHandler: [fastify.authenticate] }, async (req, 
   try {
     const existing = await fastify.db.get("SELECT * FROM Player WHERE nickname = ?", [nickname]);
     if (existing) return reply.code(409).send({ success: false, error: "Nickname already taken" });
-
-    await fastify.db.run("UPDATE Player SET nickname = ? WHERE user_id = ?", [nickname, userId]);
+    // try update
+    const result = await fastify.db.run(
+        "UPDATE Player SET nickname = ? WHERE user_id = ? AND tournament_id = 1",
+        [nickname.trim(), userId]
+    );
+    // if no rows updated, insert
+    if (result.changes === 0) {
+        await fastify.db.run(
+            "INSERT INTO Player (user_id, tournament_id, nickname) VALUES (?, 1, ?)",
+            [userId, nickname.trim()]
+        );
+    }    
     reply.send({ success: true, message: "Display name updated" });
   } catch (err: any) {
     reply.code(500).send({ success: false, error: err.message });
   }
 });
+*/
+fastify.put("/displayname", { preHandler: [fastify.authenticate] }, async (req, reply) => {
+    const { nickname } = req.body as any;
+    const userId = req.user.id;
 
+    if (!nickname || !nickname.trim())
+        return reply.code(400).send({ success: false, error: "Nickname required" });
+
+    try {
+        const trimmedNick = nickname.trim();
+
+        // Check if nickname is already taken for this tournament (optional)
+        const existing = await fastify.db.get(
+            "SELECT * FROM Player WHERE nickname = ?",
+            [trimmedNick]
+        );
+        if (existing) return reply.code(409).send({ success: false, error: "Nickname already taken" });
+
+        // Ensure the default tournament exists
+        const tournament = await fastify.db.get(
+            "SELECT tournament_id FROM Tournament WHERE tournament_id = ?",
+            [1]
+        );
+        if (!tournament) return reply.code(400).send({ success: false, error: "Default tournament not found" });
+
+        // Try updating first
+        const result = await fastify.db.run(
+            "UPDATE Player SET nickname = ? WHERE user_id = ? AND tournament_id = ?",
+            [trimmedNick, userId, 1]
+        );
+
+        // If no rows updated, insert a new row
+        if (result.changes === 0) {
+            await fastify.db.run(
+                "INSERT INTO Player (user_id, tournament_id, nickname) VALUES (?, ?, ?)",
+                [userId, 1, trimmedNick]
+            );
+        }
+        reply.send({ success: true, message: "Display name updated" });
+    } catch (err: any) {
+        reply.code(500).send({ success: false, error: err.message });
+    }
+});
 // ----------------------------
 // Upload Avatar
 // ----------------------------
