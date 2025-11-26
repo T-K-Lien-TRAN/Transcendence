@@ -70,6 +70,11 @@ export const getUserProfile = (userId: number) =>
 
 export const getLeaderboard = () => request("/stats/leaderboard");
 
+// --- MATCHS ---
+export const getMatchHistory = (userId: number) =>
+    request(`/user/${userId}/match-history`);
+
+
 // --- TOURNAMENT ---
 export const createTournament = (data: any) =>
   request("/tournament", { method: "POST", body: JSON.stringify(data) });

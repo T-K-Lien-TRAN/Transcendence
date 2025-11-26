@@ -1,7 +1,7 @@
 import { showHome } from "./home";
 import { showGame } from "./pong";
 import { showTournament } from "./tournament";
-import { sendFriendRequest, acceptFriend, getFriends, getIncomingRequests, getSentRequests, blockFriend } from "./api";
+import { sendFriendRequest, acceptFriend, getFriends, getIncomingRequests, getSentRequests, blockFriend, getMatchHistory } from "./api";
 import { io } from "socket.io-client";
 
 window.addEventListener("DOMContentLoaded", () => {
@@ -288,3 +288,68 @@ friendForm.addEventListener("submit", async e => {
 document.addEventListener("DOMContentLoaded", () => {
     if (currentUserId) loadAllFriendsData();
 });
+
+// ----------------------------
+// Show Matchs Panel
+// ----------------------------
+function openMatchesPanel(userId) {
+    document.getElementById("matches-panel").classList.remove("hidden");
+    showSection("matches-panel");
+    loadMatchHistory(userId);
+}
+
+// ----------------------------
+// Load Matchs History
+// ----------------------------
+async function loadMatchHistory(userId) {
+    try {
+        // Fetch the raw response
+        const response = await getMatchHistory(userId);
+        console.log("Raw match history response:", response);
+
+        // Determine where the matches array actually is
+        let matches: any[] = [];
+
+        if (Array.isArray(response)) {
+            // Case: API returns array directly
+            matches = response;
+        } else if (response.matches) {
+            // Case: API returns { success: true, matches: [...] }
+            matches = response.matches;
+        } else if (response.data?.matches) {
+            // Case: API returns { data: { matches: [...] } } 
+            matches = response.data.matches;
+        }
+
+        const container = document.getElementById("matches-list");
+
+        if (!matches.length) {
+            container.innerHTML = "<p class='text-gray-400'>No matches played yet.</p>";
+            return;
+        }
+
+        container.innerHTML = matches.map(m => `
+            <div class="p-3 border-b border-gray-600">
+                <div class="flex justify-between">
+                    <span>Vs <strong>${m.opponent_name}</strong></span>
+                    <span>${new Date(m.date).toLocaleString()}</span>
+                </div>
+                <div>
+                    Score: <span class="text-orange-400">${m.user_score}</span>
+                    -
+                    <span class="text-blue-400">${m.opponent_score}</span>
+                </div>
+                <div class="text-sm text-gray-400">
+                    Result: <strong class="${m.result === 'win' ? 'text-green-400' : m.result === 'loss' ? 'text-red-400' : 'text-yellow-400'}">
+                        ${m.result}
+                    </strong>
+                </div>
+            </div>
+        `).join("");
+    } catch (err: any) {
+        console.error("Failed to load match history:", err);
+        const container = document.getElementById("matches-list");
+        container.innerHTML = "<p class='text-red-400'>Failed to load matches. Please try again later.</p>";
+    }
+}
+
