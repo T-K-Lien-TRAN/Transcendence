@@ -15,6 +15,8 @@ window.addEventListener("DOMContentLoaded", async () => {
                     me = res.user;
                     window.currentUserId = me.id;
                     sessionStorage.setItem("me", JSON.stringify(me));
+                    localStorage.setItem("me", JSON.stringify(me)); 
+                    console.log("[ensureCurrentUser] Updated me object:", me);
                 } else {
                     console.warn("Failed to fetch /me:", res.error);
                 }
@@ -23,8 +25,9 @@ window.addEventListener("DOMContentLoaded", async () => {
             }
         }
     }
+    await ensureCurrentUser(); 
     // Now run router AFTER user is loaded
-    await router();
+    //await router();
 
     // ---- Rebind des boutons de la Home après chaque render ----
     function bindHomeButtons() {
@@ -93,6 +96,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     // Updated Router (supports friends + matches)
     // -------------------------
     async function router() {
+        await ensureCurrentUser();
         const hash = window.location.hash;
         app.innerHTML = "";
 
@@ -112,19 +116,19 @@ window.addEventListener("DOMContentLoaded", async () => {
                 break;
 
             case "#friends":
+                //await ensureCurrentUser();
                 document.getElementById("friends-panel")!.classList.remove("hidden");
-                await ensureCurrentUser();
                 await loadAllFriendsData();
                 break;
 
             case "#matches":
                 document.getElementById("matches-panel")!.classList.remove("hidden");
-                await ensureCurrentUser();
+                //await ensureCurrentUser();
                 await window.showMatchesPanel();
                 break;
             case "#profile":
                 document.getElementById("profile-panel")!.classList.remove("hidden");
-                await ensureCurrentUser();
+                //await ensureCurrentUser();
                 loadProfile();
                 break;
 
@@ -160,7 +164,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     // Router activation
     window.addEventListener("hashchange", router);
 
-    //router(); // initial render
+    router(); // initial render
 });
 
 // -------------------------
@@ -206,6 +210,7 @@ window.saveUserSession = function (user: any) {
     me = user;
     token = user.token;
     window.currentUserId = user.id;
+    //router();
 };
 
 // Show friends panel
@@ -220,6 +225,7 @@ window.showFriendsPanel = function () {
 let socket: ReturnType<typeof io> | null = null;
 
 function initSocket(friendsIds: number[]) {
+    if (!me?.id || socket) return;
     if (!socket) {
         const token = localStorage.getItem("jwt");
         if (!token) return;
@@ -353,6 +359,10 @@ function updateFriendStatus(userId: number, online: boolean) {
 // Load all friend data
 // ----------------------------
 async function loadAllFriendsData() {
+    if (!me?.id) {
+        console.error("User not loaded yet, skipping friends data loading.");
+        return;
+    }
     await loadFriendList();
     await loadIncomingRequests();
     await loadSentRequests();
@@ -483,15 +493,15 @@ async function loadMatchHistory(userId: number) {
             return `
                 <div class="p-3 border-b border-gray-600">
                     <div class="flex flex-col justify-left">
-                        <span class="text-sm text-white"><strong>${myName}</strong> Vs <strong>${opponentName}</strong></span>
-                        <span class="text-sm text-white">Date: ${formatMatchDate(m.date)}</span>
+                        <span class="text-sm text-gray-400"><strong>${myName}</strong> Vs <strong>${opponentName}</strong></span>
+                        <span class="text-sm text-gray-400">Date: ${formatMatchDate(m.date)}</span>
                     </div>
-                    <div class="text-sm text-white">
+                    <div class="text-sm text-gray-400">
                         Score: <span class="text-orange-400">${myScore}</span>
                         - 
                         <span class="text-blue-400">${oppScore}</span>
                     </div>
-                    <div class="text-sm text-white">
+                    <div class="text-sm text-gray-400">
                         Result: <strong class="${resultForUser === 'win' ? 'text-green-400' :
                                 resultForUser === 'loss' ? 'text-red-400' : 'text-yellow-400'}">
                             ${resultForUser}

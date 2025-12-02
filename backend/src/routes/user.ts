@@ -567,8 +567,11 @@ fastify.get("/user/:id/match-history", { preHandler: [fastify.authenticate] }, a
                 "UPDATE Player SET nickname = ? WHERE user_id = ?",
                 [trimmedNick, userId]
             );
+            
+            // Fetch updated user profile
+            const updatedUser = await getFullUserProfile(fastify.db, userId);
 
-            reply.send({ success: true, message: "Display name updated" });
+            reply.send({ success: true, user: updatedUser });
         } catch (err: any) {
             reply.code(500).send({ success: false, error: err.message });
         }

@@ -75,6 +75,8 @@ Secret: s-s4t2ud-7c32de3831b9314649caa118895c3e3fb154881f0f6f9e67fe459de56cd405f
 
 1.Create une branche: 
 git checkout -b branche name
+git push -u origin branche name
+git branch
 
 2. Merge branch into main:
 # a. Update local main from remote
