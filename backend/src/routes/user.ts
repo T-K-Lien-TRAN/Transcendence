@@ -318,16 +318,29 @@ fastify.get("/me", { preHandler: [fastify.authenticate] },
 
   try {
     // Update the existing pending request (either direction)
-    const result = await fastify.db.run(
+/*
+      const result = await fastify.db.run(
       `UPDATE Friend
        SET status='accepted'
        WHERE (user_id=? AND friend_id=?)
           OR (user_id=? AND friend_id=?)`,
       [userId, friendId, friendId, userId]
     );
-
+    */
+      const result = await fastify.db.run(
+          `UPDATE Friend
+         SET status = 'accepted'
+         WHERE status = 'pending'
+           AND (
+                (user_id = ? AND friend_id = ?)
+             OR (user_id = ? AND friend_id = ?)
+           )`,
+          [userId, friendId, friendId, userId]
+      );
     // Increase stats only if the row was actually updated
-    if (result.changes > 0) {
+      //if (result.changes > 0) {
+      // Increment friends ONLY when pending -> accepted
+      if (result.changes === 1) {
       await fastify.db.run(
         "UPDATE UserStats SET friends = friends + 1 WHERE user_id IN (?, ?)",
         [userId, friendId]
@@ -544,6 +557,121 @@ fastify.post(
 
     reply.send({ success: true, avatar: avatarPath });
   }
-);
-}
+    );
 
+    fastify.get("/players", async (req, reply) => {
+        try {
+            const players = await fastify.db.all(`
+                  SELECT 
+                    u.id,
+                    u.username,
+                    u.avatar,
+                    us.elo,
+                    us.matches_played,
+                    us.winrate,
+                    us.friends
+                  FROM User u
+                  JOIN UserStats us ON us.user_id = u.id
+                  ORDER BY us.elo DESC
+                `);
+
+            reply.send({ players });
+        } catch (err: any) {
+            reply.code(500).send({ error: err.message });
+        }
+    });
+
+    fastify.get("/matches", async (req, reply) => {
+        try {
+            const matches = await fastify.db.all(`
+                  SELECT
+                    mh.match_id,
+                    u1.username AS user_name,
+                    u2.username AS opponent_name,
+                    mh.user_score,
+                    mh.opponent_score,
+                    mh.result,
+                    mh.date
+                  FROM MatchHistory mh
+                  JOIN User u1 ON u1.id = mh.user_id
+                  JOIN User u2 ON u2.id = mh.opponent_id
+                  ORDER BY mh.date DESC
+                  LIMIT 50
+                `);
+
+            reply.send({ matches });
+        } catch (err: any) {
+            reply.code(500).send({ error: err.message });
+        }
+    });
+
+    fastify.get("/tournaments", async (request, reply) => {
+        try {
+            // Query tournaments with player counts
+            const tournaments = await fastify.db.all(`
+                  SELECT
+                    t.tournament_id,
+                    t.name,
+                    t.status,
+                    t.max_players,
+                    COUNT(p.player_id) AS player_count
+                  FROM Tournament t
+                  LEFT JOIN Player p ON p.tournament_id = t.tournament_id
+                  GROUP BY t.tournament_id
+                  ORDER BY t.tournament_id DESC
+                `);
+
+            reply.send({ tournaments });
+        } catch (err: any) {
+            console.error("Error fetching tournaments:", err);
+            reply.code(500).send({ error: "Failed to fetch tournaments" });
+        }
+    });
+
+    fastify.get("/rankings", async (req, reply) => {
+        try {
+            const totalUsers = await fastify.db.get(
+                `SELECT COUNT(*) AS count FROM User`
+            );
+
+            const totalMatches = await fastify.db.get(
+                `SELECT COUNT(*) AS count FROM MatchHistory`
+            );
+
+            const ongoingTournaments = await fastify.db.get(
+                `SELECT COUNT(*) AS count FROM Tournament WHERE status='ongoing'`
+            );
+
+            const topPlayers = await fastify.db.all(`
+                  SELECT u.username, us.elo
+                  FROM UserStats us
+                  JOIN User u ON u.id = us.user_id
+                  ORDER BY us.elo DESC
+                  LIMIT 5
+                `);
+
+            const recentMatches = await fastify.db.all(`
+                  SELECT
+                    u1.username AS player,
+                    u2.username AS opponent,
+                    mh.result,
+                    mh.date
+                  FROM MatchHistory mh
+                  JOIN User u1 ON u1.id = mh.user_id
+                  JOIN User u2 ON u2.id = mh.opponent_id
+                  ORDER BY mh.date DESC
+                  LIMIT 5
+                `);
+
+            reply.send({
+                totalUsers: totalUsers.count,
+                totalMatches: totalMatches.count,
+                ongoingTournaments: ongoingTournaments.count,
+                topPlayers,
+                recentMatches
+            });
+        } catch (err: any) {
+            reply.code(500).send({ error: err.message });
+        }
+    });
+}

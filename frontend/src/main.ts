@@ -5,7 +5,10 @@ import { showTournament } from "./tournament";
 import { sendFriendRequest, acceptFriend, getFriends, getIncomingRequests, getSentRequests, blockFriend, unblockFriend, getMatchHistory, fetchUserMe } from "./api";
 import { setup2FA, verify2FA, disable2FA } from "./api";
 import { io } from "socket.io-client";
-
+import { renderRankings } from "./rankings";
+import { renderPlayers } from "./players";
+import { renderMatches } from "./matches";
+import { renderTournaments } from "./tournamentinfor";
 // -------------------------
 // Global state
 // -------------------------
@@ -61,7 +64,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         const playDuoLocalBtn = document.getElementById("playDuoLocalBtn");
         const playQuadBtn = document.getElementById("playQuadBtn");
         const playQuadLocalBtn = document.getElementById("playQuadLocalBtn");
-        const viewTournamentBtn = document.getElementById("viewtournamentBtn");
+        const viewTournamentBtn = document.getElementById("viewtournamentBtn");   
 
         playDuoBtn?.addEventListener("click", () => {
             showGame(gameContainer, "duo");
@@ -82,7 +85,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         // bouton "View Tournaments" dans les quick actions
         viewTournamentBtn?.addEventListener("click", () => {
             window.location.hash = "#tournament";
-        });
+        });        
     }
 
     // -------------------------
@@ -102,6 +105,25 @@ window.addEventListener("DOMContentLoaded", async () => {
                 showHome(app);
                 bindHomeButtons();
                 break;
+            case "#players":
+                await ensureCurrentUser();
+                renderPlayers(app);
+                break;
+
+            case "#matchesinfor":
+                await ensureCurrentUser();
+                renderMatches(app);
+                break;
+
+            case "#tournamentinfor":
+                await ensureCurrentUser();
+                renderTournaments(app);
+                break;
+
+            case "#rankings":
+                await ensureCurrentUser();
+                renderRankings(app);
+                break;
 
             case "#tournament":
                 showTournament(app);
@@ -118,18 +140,20 @@ window.addEventListener("DOMContentLoaded", async () => {
                 await ensureCurrentUser();
                 await window.showMatchesPanel();
                 break;
+
             case "#profile":
                 document.getElementById("profile-panel")!.classList.remove("hidden");
                 await ensureCurrentUser();
                 loadProfile();
                 break;
+
             case "#auth":
                 document.getElementById("authentication-panel")!.classList.remove("hidden");
                 await ensureCurrentUser();
                 init2FASetup();
                 init2FADisable();                
                 update2FAButtons();
-                break;
+                break;          
 
             default:
                 app.innerHTML = `<p class="text-red-500">Page not found</p>`;
@@ -140,7 +164,16 @@ window.addEventListener("DOMContentLoaded", async () => {
     // Navbar buttons
     // -------------------------
   document.getElementById("homeBtn")?.addEventListener("click", () => (window.location.hash = "#home"));
-    document.getElementById("tournamentBtn")?.addEventListener("click", () => (window.location.hash = "#tournament"));
+  document.getElementById("tournamentBtn")?.addEventListener("click", () => (window.location.hash = "#tournamentinfor"));
+   
+    document.getElementById("playersBtn")
+        ?.addEventListener("click", () => (window.location.hash = "#players"));
+
+    document.getElementById("matchesBtn")
+        ?.addEventListener("click", () => (window.location.hash = "#matchesinfor"));
+
+    document.getElementById("rankingsBtn")
+        ?.addEventListener("click", () => (window.location.hash = "#rankings"));
 
     // Dropdown buttons
     document.querySelector('#userMenuDropdown [data-target="profile-panel"]')

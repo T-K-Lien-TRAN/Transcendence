@@ -1,7 +1,7 @@
 //const API_BASE = "https://localhost:3000/api";
-const API_BASE = window.location.origin + "/api";
+export const API_BASE = window.location.origin + "/api";
 
-async function request(endpoint: string, options: RequestInit = {}) {
+export async function request(endpoint: string, options: RequestInit = {}) {
    //const token = localStorage.getItem("jwt");
    const token = localStorage.getItem("jwt") || localStorage.getItem("token");
   console.log("Token retrieved:", token);
@@ -99,13 +99,14 @@ export const fetchUserMe = () => request("/user/me");
 
 export const getMatchHistory = (userId: number) =>
     request(`/user/${userId}/match-history`);
-
+/*
 // --- STATS ---
 export const getUserProfile = (userId: number) =>
   request(`/user/${userId}`);
 
 export const getLeaderboard = () => request("/stats/leaderboard");
 
+*/
 // --- TOURNAMENT ---
 export const createTournament = (data: any) =>
   request("/tournament", { method: "POST", body: JSON.stringify(data) });
@@ -119,7 +120,7 @@ export const fetchPlayers = async (tournament_id: number) => {
 
 // --- NOTIFICATIONS ---
 export const getNotifications = (userId: number) =>
-  request(`/notifications/${userId}`);
+    request(`/notifications/${userId}`);
 
 // --- Avatar upload helper (multipart) ---
 export const uploadAvatar = async (file: File) => {
