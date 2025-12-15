@@ -1,12 +1,8 @@
-// backend/src/services/blockchain.ts
-
 import { ethers } from "ethers";
 import dotenv from "dotenv";
 
 dotenv.config();
 
-// ✅ MISE A JOUR : On utilise l'ABI complet (format JSON) au lieu de la chaine de caractères manuelle.
-// Cela permet à ethers.js de comprendre aussi les Events si besoin plus tard.
 const CONTRACT_ABI = [
   {
     "inputs": [
@@ -48,7 +44,6 @@ export class BlockchainService {
       return;
     }
 
-    // Ignore placeholder keys to avoid crashing the app
     const isPlaceholder = /private_key/i.test(privateKey);
     if (isPlaceholder) {
       console.warn("⚠️ BACKEND_WALLET_PRIVATE_KEY is a placeholder; blockchain disabled.");
