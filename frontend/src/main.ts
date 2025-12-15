@@ -5,10 +5,8 @@ import { showTournament } from "./tournament";
 import { sendFriendRequest, acceptFriend, getFriends, getIncomingRequests, getSentRequests, blockFriend, unblockFriend, getMatchHistory, fetchUserMe } from "./api";
 import { setup2FA, verify2FA, disable2FA } from "./api";
 import { io } from "socket.io-client";
-import { renderRankings } from "./rankings";
-import { renderPlayers } from "./players";
-import { renderMatches } from "./matches";
-import { renderTournaments } from "./tournamentinfor";
+import { getLeaderboard } from "./api";
+
 // -------------------------
 // Global state
 // -------------------------
@@ -40,6 +38,35 @@ async function ensureCurrentUser() {
         console.error("[ensureCurrentUser] Error fetching user:", err);
     }
 }
+
+// -------------------------
+// Profile rendering (current user)
+// -------------------------
+function loadProfile() {
+    const usernameEl = document.getElementById("profile-username");
+    const emailEl = document.getElementById("profile-email");
+    const eloEl = document.getElementById("profile-elo");
+    const matchesEl = document.getElementById("profile-matches");
+    const winrateEl = document.getElementById("profile-winrate");
+    const avatarEl = document.getElementById("profile-avatar") as HTMLImageElement | null;
+
+    const safe = (v: any, fallback: string = "—") => (v === null || v === undefined || v === "" ? fallback : v);
+
+    usernameEl && (usernameEl.textContent = safe(me.username));
+    emailEl && (emailEl.textContent = safe(me.email));
+    eloEl && (eloEl.textContent = safe(me.elo ?? me.rank ?? "—"));
+    matchesEl && (matchesEl.textContent = safe(me.matches_played ?? me.matches ?? "0"));
+    if (winrateEl) {
+        const wr =
+            me.winrate !== undefined && me.winrate !== null
+                ? `${Number(me.winrate).toFixed(1)}%`
+                : "—";
+        winrateEl.textContent = wr;
+    }
+    if (avatarEl && me.avatar) {
+        avatarEl.src = me.avatar;
+    }
+}
 // ------------------------------
 // DOMContentLoaded
 // ------------------------------
@@ -48,9 +75,6 @@ window.addEventListener("DOMContentLoaded", async () => {
      await ensureCurrentUser();
 
     console.log("[DOMContentLoaded] User ready:", me);
-
-    // Initialize socket connection once at startup
-    initSocket();
 
     // activate hash router
     window.addEventListener("hashchange", router);
@@ -64,7 +88,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         const playDuoLocalBtn = document.getElementById("playDuoLocalBtn");
         const playQuadBtn = document.getElementById("playQuadBtn");
         const playQuadLocalBtn = document.getElementById("playQuadLocalBtn");
-        const viewTournamentBtn = document.getElementById("viewtournamentBtn");   
+        const viewTournamentBtn = document.getElementById("viewtournamentBtn");
 
         playDuoBtn?.addEventListener("click", () => {
             showGame(gameContainer, "duo");
@@ -85,7 +109,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         // bouton "View Tournaments" dans les quick actions
         viewTournamentBtn?.addEventListener("click", () => {
             window.location.hash = "#tournament";
-        });        
+        });
     }
 
     // -------------------------
@@ -99,30 +123,12 @@ window.addEventListener("DOMContentLoaded", async () => {
         document.getElementById("friends-panel")?.classList.add("hidden");
         document.getElementById("matches-panel")?.classList.add("hidden");
         document.getElementById("profile-panel")?.classList.add("hidden");
+        document.getElementById("leaderboard-panel")?.classList.add("hidden");
         switch (hash) {
             case "":
             case "#home":
                 showHome(app);
                 bindHomeButtons();
-                break;
-            case "#players":
-                await ensureCurrentUser();
-                renderPlayers(app);
-                break;
-
-            case "#matchesinfor":
-                await ensureCurrentUser();
-                renderMatches(app);
-                break;
-
-            case "#tournamentinfor":
-                await ensureCurrentUser();
-                renderTournaments(app);
-                break;
-
-            case "#rankings":
-                await ensureCurrentUser();
-                renderRankings(app);
                 break;
 
             case "#tournament":
@@ -140,20 +146,23 @@ window.addEventListener("DOMContentLoaded", async () => {
                 await ensureCurrentUser();
                 await window.showMatchesPanel();
                 break;
-
+            case "#leaderboard":
+                document.getElementById("leaderboard-panel")!.classList.remove("hidden");
+                await ensureCurrentUser();
+                await loadLeaderboard();
+                break;
             case "#profile":
                 document.getElementById("profile-panel")!.classList.remove("hidden");
                 await ensureCurrentUser();
                 loadProfile();
                 break;
-
             case "#auth":
                 document.getElementById("authentication-panel")!.classList.remove("hidden");
                 await ensureCurrentUser();
                 init2FASetup();
                 init2FADisable();                
                 update2FAButtons();
-                break;          
+                break;
 
             default:
                 app.innerHTML = `<p class="text-red-500">Page not found</p>`;
@@ -163,17 +172,16 @@ window.addEventListener("DOMContentLoaded", async () => {
     // -------------------------
     // Navbar buttons
     // -------------------------
-  document.getElementById("homeBtn")?.addEventListener("click", () => (window.location.hash = "#home"));
-  document.getElementById("tournamentBtn")?.addEventListener("click", () => (window.location.hash = "#tournamentinfor"));
-   
-    document.getElementById("playersBtn")
-        ?.addEventListener("click", () => (window.location.hash = "#players"));
-
-    document.getElementById("matchesBtn")
-        ?.addEventListener("click", () => (window.location.hash = "#matchesinfor"));
-
-    document.getElementById("rankingsBtn")
-        ?.addEventListener("click", () => (window.location.hash = "#rankings"));
+    document.getElementById("homeBtn")?.addEventListener("click", () => {
+    // si un jeu tourne, on le stoppe proprement
+    if ((window as any).stopCurrentGame) {
+        try { (window as any).stopCurrentGame(); } catch (e) { console.warn(e); }
+    }
+    window.location.hash = "#home";
+  });
+    document.getElementById("tournamentBtn")?.addEventListener("click", () => (window.location.hash = "#tournament"));
+    document.getElementById("matchesBtn")?.addEventListener("click", () => (window.location.hash = "#matches"));
+    document.getElementById("leaderboardBtn")?.addEventListener("click", () => (window.location.hash = "#leaderboard"));
 
     // Dropdown buttons
     document.querySelector('#userMenuDropdown [data-target="profile-panel"]')
@@ -215,60 +223,50 @@ window.showFriendsPanel = function () {
 // ----------------------------
 let socket: ReturnType<typeof io> | null = null;
 
-function initSocket() {
-    if (socket) return; // Socket already initialized
+function initSocket(friendsIds: number[]) {
+    if (!socket) {
+        const token = localStorage.getItem("jwt");
+        if (!token) return;
 
-    const token = localStorage.getItem("jwt");
-    if (!token) return;
+        socket = io("https://localhost:3000", { auth: { token } });
 
-    socket = io("https://saul-unsubpoenaed-lakeisha.ngrok-free.dev", { auth: { token } });
+        // Friend online/offline updates
+        socket.on("user:online", ({ userId }) => updateFriendStatus(userId, true));
+        socket.on("user:offline", ({ userId }) => updateFriendStatus(userId, false));
 
-    // Friend online/offline updates
-    socket.on("user:online", ({ userId }: { userId: number }) => updateFriendStatus(userId, true));
-    socket.on("user:offline", ({ userId }: { userId: number }) => updateFriendStatus(userId, false));
+        socket.on("connect", () => {
+            socket!.emit("get:onlineFriends", friendsIds);
+        });
 
-    socket.on("connect", () => {
-        console.log("[socket] Connected - requesting online friends");
-        requestOnlineFriendsUpdate();
-    });
+        socket.on("onlineFriends", (onlineIds: number[]) => {
+            onlineIds.forEach(id => updateFriendStatus(id, true));
+        });
+         // -------------------------
+        // 🔥 NEW: Real-time friend requests
+        // -------------------------
+        socket.on("friend:request", () => {
+            console.log("[socket] Received a new friend request");
+            loadIncomingRequests();
+        });
+        /*
+        socket.on("friend:accepted", () => {
+            console.log("[socket] Your friend request was accepted");
+            loadAllFriendsData();
+        });
+        */
+        socket.on("friend:accepted", async ({ userId }) => {
+            console.log("[socket] Friend accepted:", userId);
 
-    socket.on("onlineFriends", (onlineIds: number[]) => {
-        onlineIds.forEach(id => updateFriendStatus(id, true));
-    });
-     // -------------------------
-    // 🔥 NEW: Real-time friend requests
-    // -------------------------
-    socket.on("friend:request", () => {
-        console.log("[socket] Received a new friend request");
-        loadIncomingRequests();
-    });
-    /*
-    socket.on("friend:accepted", () => {
-        console.log("[socket] Your friend request was accepted");
-        loadAllFriendsData();
-    });
-    */
-    socket.on("friend:accepted", async ({ userId }: { userId: number }) => {
-        console.log("[socket] Friend accepted:", userId);
+            // Reload all friend data
+            await loadAllFriendsData();
 
-        // Reload all friend data
-        await loadAllFriendsData();
+            // After loading friends, get all their IDs
+            const friendIds = Array.from(document.querySelectorAll("#friends-list [data-user-id]"))
+                .map(el => Number(el.getAttribute("data-user-id")));
 
-        // After loading friends, request online status update
-        requestOnlineFriendsUpdate();
-    });
-}
-
-// Helper to request online status for all friends
-function requestOnlineFriendsUpdate() {
-    if (!socket) return;
-
-    const friendIds = Array.from(document.querySelectorAll("#friends-list [data-user-id]"))
-        .map(el => Number(el.getAttribute("data-user-id")));
-
-    if (friendIds.length > 0) {
-        console.log("[socket] Requesting online status for friends:", friendIds);
-        socket.emit("get:onlineFriends", friendIds);
+            // Request online status for all friends
+            socket!.emit("get:onlineFriends", friendIds);
+        });
     }
 }
 
@@ -301,12 +299,11 @@ async function loadFriendList() {
 
         container.appendChild(item);
     });
-
-    // Init socket (only once, on first call)
-    initSocket();
-
-    // Request online status for all friends
-    requestOnlineFriendsUpdate();
+    const friendIds = res.friends
+        .filter(f => f.id !== window.currentUserId)
+        .map(f => f.id);
+    // Init socket now that we have friend IDs
+    initSocket(friendIds);
 }
 
 // ----------------------------
@@ -525,6 +522,48 @@ window.showMatchesPanel = function (userId?: number) {
 };
 
 // ----------------------------
+// Leaderboard
+// ----------------------------
+async function loadLeaderboard() {
+    const container = document.getElementById("leaderboard-list")!;
+    container.innerHTML = "Loading leaderboard...";
+    try {
+        const res = await getLeaderboard();
+        const rows = res?.leaderboard || res || [];
+        if (!rows.length) {
+            container.innerHTML = "<p class='text-gray-400'>No players yet.</p>";
+            return;
+        }
+        const normalizeAvatar = (url?: string) => {
+            if (!url) return "/uploads/default.png";
+            if (url.startsWith("http")) return url;
+            return url.startsWith("/uploads/") ? url : `/uploads/${url}`;
+        };
+        container.innerHTML = rows
+            .map((p: any, idx: number) => {
+                const rank = p.rank ?? idx + 1;
+                return `
+          <div class="flex items-center justify-between p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm">
+            <div class="flex items-center gap-3">
+              <div class="w-8 text-center font-bold text-purple-600">${rank}</div>
+              <img src="${normalizeAvatar(p.avatar)}" class="h-12 w-12 rounded-full border object-cover" alt="${p.username}">
+              <div>
+                <div class="text-sm font-semibold text-gray-800 dark:text-gray-100">${p.username}</div>
+                <div class="text-xs text-gray-500">${p.matches_played ?? 0} matches · ${Number(p.winrate ?? 0).toFixed(1)}% WR</div>
+              </div>
+            </div>
+            <div class="text-lg font-bold text-gray-800 dark:text-gray-100">ELO ${p.elo ?? "—"}</div>
+          </div>
+        `;
+            })
+            .join("");
+    } catch (err) {
+        console.error("[loadLeaderboard] failed", err);
+        container.innerHTML = "<p class='text-red-400'>Failed to load leaderboard.</p>";
+    }
+}
+
+// ----------------------------
 // Load Match History
 // ----------------------------
 async function loadMatchHistory(userId: number) {
@@ -557,37 +596,62 @@ async function loadMatchHistory(userId: number) {
             return;
         }
 
-        container.innerHTML = matches.map(m => {
-            console.log("[loadMatchHistory] Rendering match:", m);
-            const isUser = m.user_id == userId;
-            const myName = isUser ? m.user_name : m.opponent_name;
-            const opponentName = isUser ? m.opponent_name : m.user_name;
-            const myScore = isUser ? m.user_score : m.opponent_score;
-            const oppScore = isUser ? m.opponent_score : m.user_score;
-            const resultForUser =
-                myScore > oppScore ? 'win' :
-                    myScore < oppScore ? 'loss' :
-                        'draw';        
-            return `
-                <div class="p-3 border-b border-gray-600">
-                    <div class="flex flex-col justify-left">
-                        <span class="text-sm text-gray-400"><strong>${myName}</strong> Vs <strong>${opponentName}</strong></span>
-                        <span class="text-sm text-gray-400">Date: ${formatMatchDate(m.date)}</span>
-                    </div>
-                    <div class="text-sm text-gray-400">
-                        Score: <span class="text-orange-400">${myScore}</span>
-                        - 
-                        <span class="text-blue-400">${oppScore}</span>
-                    </div>
-                    <div class="text-sm text-gray-400">
-                        Result: <strong class="${resultForUser === 'win' ? 'text-green-400' :
-                                resultForUser === 'loss' ? 'text-red-400' : 'text-yellow-400'}">
-                            ${resultForUser}
-                        </strong>
-                    </div>
+        const normalizeAvatar = (url?: string) => {
+            if (!url) return "/uploads/default.png";
+            if (url.startsWith("http")) return url;
+            return url.startsWith("/uploads/") ? url : `/uploads/${url}`;
+        };
+
+        container.innerHTML = matches
+            .map((m: any) => {
+                const isUserRow = m.user_id == userId;
+                const left = {
+                    name: m.user_name || `User ${m.user_id}`,
+                    avatar: normalizeAvatar(m.user_avatar),
+                    score: m.user_score ?? 0,
+                };
+                const right = {
+                    name: m.opponent_name || `User ${m.opponent_id}`,
+                    avatar: normalizeAvatar(m.opponent_avatar),
+                    score: m.opponent_score ?? 0,
+                };
+                const winner =
+                    left.score === right.score ? "draw" : left.score > right.score ? "left" : "right";
+                const yourElo = m.user_id == userId ? m.user_elo : "—";
+                const badge =
+                    winner === "draw"
+                        ? `<span class="px-2 py-1 text-xs rounded bg-gray-500 text-white">Draw</span>`
+                        : `<span class="px-2 py-1 text-xs rounded ${
+                              winner === "left" ? "bg-green-600" : "bg-blue-600"
+                          } text-white">Winner: ${winner === "left" ? left.name : right.name}</span>`;
+
+                return `
+            <div class="p-4 mb-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm">
+              <div class="flex items-center justify-between gap-3">
+                <div class="flex items-center gap-3 ${winner === "left" ? "opacity-100" : "opacity-80"}">
+                  <img src="${left.avatar}" class="h-12 w-12 rounded-full border border-gray-300 object-cover" alt="${left.name}">
+                  <div>
+                    <div class="text-sm font-semibold text-gray-800 dark:text-gray-100">${left.name}</div>
+                    <div class="text-xs text-gray-500">${formatMatchDate(m.date)}</div>
+                  </div>
                 </div>
-            `;
-        }).join("");
+                <div class="text-xl font-bold text-gray-800 dark:text-gray-100">${left.score} — ${right.score}</div>
+                <div class="flex items-center gap-3 ${winner === "right" ? "opacity-100" : "opacity-80"}">
+                  <div class="text-right">
+                    <div class="text-sm font-semibold text-gray-800 dark:text-gray-100">${right.name}</div>
+                    <div class="text-xs text-gray-500">${formatMatchDate(m.date)}</div>
+                  </div>
+                  <img src="${right.avatar}" class="h-12 w-12 rounded-full border border-gray-300 object-cover" alt="${right.name}">
+                </div>
+              </div>
+              <div class="mt-3 flex items-center justify-between">
+                ${badge}
+                <span class="text-xs text-gray-500">ELO (you): ${yourElo ?? "—"}</span>
+              </div>
+            </div>
+          `;
+            })
+            .join("");
 
     } catch (err: any) {
         console.error("[loadMatchHistory] Failed to load match history:", err);

@@ -48,6 +48,13 @@ export class BlockchainService {
       return;
     }
 
+    // Ignore placeholder keys to avoid crashing the app
+    const isPlaceholder = /private_key/i.test(privateKey);
+    if (isPlaceholder) {
+      console.warn("⚠️ BACKEND_WALLET_PRIVATE_KEY is a placeholder; blockchain disabled.");
+      return;
+    }
+
     try {
       this.provider = new ethers.JsonRpcProvider(rpcUrl);
       this.wallet = new ethers.Wallet(privateKey, this.provider);

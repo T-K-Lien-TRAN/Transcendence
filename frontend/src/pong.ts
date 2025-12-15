@@ -83,6 +83,8 @@ export async function showGame(container: HTMLElement, mode: GameMode = "duo") {
     let canvas!: HTMLCanvasElement;
     let ctx!: CanvasRenderingContext2D;
     let scoreBox!: HTMLDivElement;
+    let statusBox!: HTMLDivElement;
+    let readyButton: HTMLButtonElement | null = null;
     let messagesList: HTMLUListElement | null = null;
     let chatForm: HTMLFormElement | null = null;
     let chatInput: HTMLInputElement | null = null;
@@ -108,7 +110,14 @@ export async function showGame(container: HTMLElement, mode: GameMode = "duo") {
     }
 
     const keys = new Set<string>();
-    const keydownHandler = (e: KeyboardEvent) => keys.add(e.key);
+    const keydownHandler = (e: KeyboardEvent) => {
+        if (!isLocal && !matchStarted && !isReady && (e.key === " " || e.key === "Enter")) {
+            e.preventDefault();
+            sendReady();
+            return;
+        }
+        keys.add(e.key);
+    };
     const keyupHandler = (e: KeyboardEvent) => keys.delete(e.key);
     window.addEventListener("keydown", keydownHandler);
     window.addEventListener("keyup", keyupHandler);
@@ -116,7 +125,24 @@ export async function showGame(container: HTMLElement, mode: GameMode = "duo") {
     let gameSocket: Socket | null = null;
     let paddleInterval: number | null = null;
     let running = true;
+    let matchStarted = isLocal;
+    let isReady = isLocal;
     let myPaddleIndex: number | null = null;
+    const setStatus = (text: string) => {
+        if (statusBox) statusBox.textContent = text;
+    };
+    const sendReady = () => {
+        if (isLocal || isReady) return;
+        isReady = true;
+        if (readyButton) {
+            readyButton.disabled = true;
+            readyButton.textContent = "Prêt";
+        }
+        setStatus("Prêt - en attente des autres joueurs");
+        if (gameSocket) {
+            gameSocket.emit("ready");
+        }
+    };
 
     // ---------------------------
     // Remote matchmaking + WS
@@ -164,12 +190,34 @@ export async function showGame(container: HTMLElement, mode: GameMode = "duo") {
             canvas,
             ctx,
             scoreBox,
+            statusBox,
             messagesList,
             chatForm,
             chatInput,
         } = buildUI(container, !isLocal));
 
         currentMatchId = matchId;
+        if (!isLocal) {
+            readyButton = document.createElement("button");
+            readyButton.textContent = "Je suis prêt";
+            readyButton.style.position = "absolute";
+            readyButton.style.left = "50%";
+            readyButton.style.bottom = "24px";
+            readyButton.style.transform = "translateX(-50%)";
+            readyButton.style.padding = "10px 18px";
+            readyButton.style.borderRadius = "10px";
+            readyButton.style.border = "none";
+            readyButton.style.background = "#2563eb";
+            readyButton.style.color = "#fff";
+            readyButton.style.fontWeight = "700";
+            readyButton.style.boxShadow = "0 6px 12px rgba(0,0,0,0.15)";
+            readyButton.addEventListener("click", (e) => {
+                e.preventDefault();
+                sendReady();
+            });
+            wrapper.appendChild(readyButton);
+            setStatus('Match trouvé ! Appuie sur "Espace" ou clique sur "Je suis prêt" pour lancer le match.');
+        }
 
         gameSocket = io(`${window.location.origin}/game`, {
             transports: ["polling"],
@@ -192,113 +240,83 @@ export async function showGame(container: HTMLElement, mode: GameMode = "duo") {
                 canvas.height = config.height;
             }
 
-            // Mise à jour de la balle (toujours depuis le serveur)
             state.ball.x = msg.state.ball.x;
             state.ball.y = msg.state.ball.y;
             state.ball.vx = msg.state.ball.vx;
             state.ball.vy = msg.state.ball.vy;
-
-            // Réconciliation des paddles : ne pas écraser le paddle du joueur local
-            // (prédiction côté client), mais interpoler légèrement les autres joueurs
-            const myPaddleKey = `p${myPaddleIndex}` as keyof PaddleState;
-            const newPaddles = { ...state.paddles };
-
-            // Mettre à jour tous les paddles sauf le mien
-            (Object.keys(msg.state.paddles) as Array<keyof PaddleState>).forEach((key) => {
-                if (key !== myPaddleKey) {
-                    const serverValue = msg.state.paddles[key] as number;
-                    const currentValue = state.paddles[key] as number;
-                    // Interpolation douce pour éviter les saccades (20% vers la nouvelle position)
-                    newPaddles[key] = currentValue + (serverValue - currentValue) * 0.3 as any;
-                }
-            });
-
-            state.paddles = newPaddles;
+            state.paddles = msg.state.paddles;
             scores = msg.scores;
             renderScores(scoreBox, scores, isQuad, undefined, msg.names);
         });
 
-        // Nouvel événement pour les mises à jour de la balle uniquement (60 FPS)
-        gameSocket.on("ball", (msg: any) => {
-            if (msg.ball) {
-                state.ball.x = msg.ball.x;
-                state.ball.y = msg.ball.y;
-                state.ball.vx = msg.ball.vx;
-                state.ball.vy = msg.ball.vy;
+        gameSocket.on("ready", (msg: any) => {
+            if (msg?.readyIds?.includes(currentUserId)) {
+                isReady = true;
+                if (readyButton) {
+                    readyButton.disabled = true;
+                    readyButton.textContent = "Prêt";
+                }
             }
+            if (msg?.total) {
+                setStatus(`Prêts: ${msg.readyCount ?? 0}/${msg.total}`);
+            }
+        });
+
+        gameSocket.on("countdown", (msg: any) => {
+            matchStarted = false;
+            setStatus(`Départ dans ${msg.seconds}s`);
+            if (readyButton) readyButton.disabled = true;
+        });
+
+        gameSocket.on("start", (msg: any) => {
+            matchStarted = true;
+            isReady = true;
+            if (msg?.state) {
+                state.ball = msg.state.ball;
+                state.paddles = msg.state.paddles;
+                scores = msg.scores || scores;
+                renderScores(scoreBox, scores, isQuad, undefined, msg.names);
+            }
+            setStatus("GO !");
+            if (readyButton) readyButton.style.display = "none";
+            setTimeout(() => setStatus(""), 1200);
         });
 
         gameSocket.on("end", (msg: any) => {
             running = false;
+            matchStarted = false;
             renderScores(scoreBox, scores, isQuad, msg?.winner || "END", msg?.names);
         });
 
-        // Envoi des mouvements avec prédiction côté client
+        // Envoi des mouvements
         paddleInterval = window.setInterval(() => {
             if (!gameSocket || !myPaddleIndex) return;
+            if (!matchStarted) return;
             const payload: any = { type: "paddle" };
             const speed = config.paddleSpeed;
-            const paddleLen = config.paddleLength;
 
-            // Helper pour clamper les valeurs
-            const clamp = (val: number, min: number, max: number) => Math.max(min, Math.min(max, val));
-
-            let moved = false;
-
-            // Prédiction côté client : mise à jour locale IMMÉDIATE
             if (myPaddleIndex === 1) {
-                let newValue = state.paddles.p1;
-                if (keys.has("w")) { newValue -= speed; moved = true; }
-                if (keys.has("s")) { newValue += speed; moved = true; }
-                if (moved) {
-                    // Clamp et mise à jour locale instantanée
-                    newValue = clamp(newValue, paddleLen / 2, config.height - paddleLen / 2);
-                    state.paddles.p1 = newValue;
-                    payload.value = newValue;
-                    payload.axis = "y";
-                }
+                if (keys.has("w")) payload.value = state.paddles.p1 - speed;
+                if (keys.has("s")) payload.value = state.paddles.p1 + speed;
+                payload.axis = "y";
             }
             if (myPaddleIndex === 2) {
-                let newValue = state.paddles.p2;
-                if (keys.has("ArrowUp")) { newValue -= speed; moved = true; }
-                if (keys.has("ArrowDown")) { newValue += speed; moved = true; }
-                if (moved) {
-                    // Clamp et mise à jour locale instantanée
-                    newValue = clamp(newValue, paddleLen / 2, config.height - paddleLen / 2);
-                    state.paddles.p2 = newValue;
-                    payload.value = newValue;
-                    payload.axis = "y";
-                }
+                if (keys.has("ArrowUp")) payload.value = state.paddles.p2 - speed;
+                if (keys.has("ArrowDown")) payload.value = state.paddles.p2 + speed;
+                payload.axis = "y";
             }
             if (myPaddleIndex === 3 && isQuad) {
-                let newValue = state.paddles.p3 ?? 0;
-                if (keys.has("a")) { newValue -= speed; moved = true; }
-                if (keys.has("d")) { newValue += speed; moved = true; }
-                if (moved) {
-                    // Clamp et mise à jour locale instantanée
-                    newValue = clamp(newValue, paddleLen / 2, config.width - paddleLen / 2);
-                    state.paddles.p3 = newValue;
-                    payload.value = newValue;
-                    payload.axis = "x";
-                }
+                if (keys.has("a")) payload.value = (state.paddles.p3 ?? 0) - speed;
+                if (keys.has("d")) payload.value = (state.paddles.p3 ?? 0) + speed;
+                payload.axis = "x";
             }
             if (myPaddleIndex === 4 && isQuad) {
-                let newValue = state.paddles.p4 ?? 0;
-                if (keys.has("j")) { newValue -= speed; moved = true; }
-                if (keys.has("l")) { newValue += speed; moved = true; }
-                if (moved) {
-                    // Clamp et mise à jour locale instantanée
-                    newValue = clamp(newValue, paddleLen / 2, config.width - paddleLen / 2);
-                    state.paddles.p4 = newValue;
-                    payload.value = newValue;
-                    payload.axis = "x";
-                }
+                if (keys.has("j")) payload.value = (state.paddles.p4 ?? 0) - speed;
+                if (keys.has("l")) payload.value = (state.paddles.p4 ?? 0) + speed;
+                payload.axis = "x";
             }
 
-            // N'envoyer que si le joueur a bougé
-            if (payload.value !== undefined && moved) {
-                gameSocket.emit("paddle", payload);
-            }
+            if (payload.value !== undefined) gameSocket.emit("paddle", payload);
         }, 1000 / 60);
 
         // Init chat
@@ -315,6 +333,7 @@ export async function showGame(container: HTMLElement, mode: GameMode = "duo") {
             canvas,
             ctx,
             scoreBox,
+            statusBox,
             messagesList,
             chatForm,
             chatInput,
@@ -368,7 +387,11 @@ export async function showGame(container: HTMLElement, mode: GameMode = "duo") {
         }
         window.removeEventListener("keydown", keydownHandler);
         window.removeEventListener("keyup", keyupHandler);
+        (window as any).stopCurrentGame = undefined;
     }
+
+    // expose teardown for external navigation (e.g., Home button)
+    (window as any).stopCurrentGame = teardown;
 }
 
 // ---------------------------
@@ -569,6 +592,7 @@ function buildUI(
     canvas: HTMLCanvasElement;
     ctx: CanvasRenderingContext2D;
     scoreBox: HTMLDivElement;
+    statusBox: HTMLDivElement;
     messagesList: HTMLUListElement | null;
     chatForm: HTMLFormElement | null;
     chatInput: HTMLInputElement | null;
@@ -627,6 +651,20 @@ function buildUI(
     scoreBox.style.fontSize = "14px";
     wrapper.appendChild(scoreBox);
 
+    const statusBox = document.createElement("div");
+    statusBox.style.position = "absolute";
+    statusBox.style.top = "52px";
+    statusBox.style.left = "50%";
+    statusBox.style.transform = "translateX(-50%)";
+    statusBox.style.background = "rgba(17,24,39,0.85)";
+    statusBox.style.color = "#fff";
+    statusBox.style.padding = "6px 10px";
+    statusBox.style.borderRadius = "8px";
+    statusBox.style.fontSize = "13px";
+    statusBox.style.fontWeight = "600";
+    statusBox.style.pointerEvents = "none";
+    wrapper.appendChild(statusBox);
+
     let messagesList: HTMLUListElement | null = null;
     let chatForm: HTMLFormElement | null = null;
     let chatInput: HTMLInputElement | null = null;
@@ -683,7 +721,7 @@ function buildUI(
         wrapper.appendChild(chatWrapper);
     }
 
-    return { overlay, wrapper, canvas, ctx, scoreBox, messagesList, chatForm, chatInput };
+    return { overlay, wrapper, canvas, ctx, scoreBox, statusBox, messagesList, chatForm, chatInput };
 }
 
 // ---------------------------

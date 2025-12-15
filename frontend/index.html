@@ -100,6 +100,10 @@
             });
         });
     </script>
+    <script>
+        // Use current origin so requests go to the same host the page was loaded from (LAN IP)
+        const API_BASE = window.location.origin; // e.g. "https://192.168.1.74:3000"
+    </script>
 
 </head>
 <body class="bg-gradient-to-br from-gray-100 to-white dark:from-gray-900 dark:to-gray-800 flex flex-col justify-center items-center min-h-screen transition-all duration-500 relative">
@@ -117,7 +121,7 @@
         </div>
     </section>
     <!-- SIGN IN SECTION -->
-    <section id="signin-section" class="bg-white dark:bg-gray-900 shadow-xl rounded-2xl p-8 w-80 sm:w-96 text-center transition-all duration-500">
+    <section id="signin-section" method="POST" action="https://localhost:3000/api/auth/signin" class="bg-white dark:bg-gray-900 shadow-xl rounded-2xl p-8 w-80 sm:w-96 text-center transition-all duration-500">
         <h2 class="text-2xl font-semibold mb-6 text-gray-800 dark:text-gray-100">Sign in</h2>
 
         <form id="signin-form">
@@ -136,12 +140,12 @@
             <p id="signin-message" class="mt-2 text-sm text-gray-600"></p>
             <div class="my-3 text-gray-500 dark:text-gray-400 text-sm">or</div>
 
-            <a data-oauth href="/api/auth/github/login"
+            <a data-oauth href="https://saul-unsubpoenaed-lakeisha.ngrok-free.dev/api/auth/github/login"
                class="w-full flex items-center justify-center gap-2 border border-gray-300 dark:border-gray-700 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition">
                 <img src="https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/github.svg" class="w-5" alt="GitHub logo">
                 Sign in with GitHub
             </a>
-            <a data-oauth href="/api/auth/signin"
+            <a data-oauth href="https://saul-unsubpoenaed-lakeisha.ngrok-free.dev/api/auth/signin"
                class="w-full flex items-center justify-center gap-2 border border-gray-300 dark:border-gray-700 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 mt-2 transition">
                 <img src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='14' fill='%23007ACC'/><text x='50' y='62' font-size='42' text-anchor='middle' fill='white' font-family='system-ui,Arial,sans-serif'>42</text></svg>"
                      class="w-5 h-5" alt="42 logo">
@@ -233,9 +237,9 @@
                         <button id="homeBtn" class="px-3 py-1 rounded-md bg-blue-600 hover:bg-blue-700 focus:ring-2 focus:ring-blue-400">Home</button>
                         <button id="tournamentBtn" class="px-3 py-1 rounded-md bg-green-600 hover:bg-green-700 focus:ring-2 focus:ring-green-400">Tournament</button>
                         <button id="playersBtn" class="px-3 py-1 rounded-md bg-purple-600 hover:bg-purple-700 focus:ring-2 focus:ring-purple-400">Players</button>
-                        <button id="matchesBtn" class="px-3 py-1 rounded-md bg-yellow-500 hover:bg-yellow-600 focus:ring-2 focus:ring-yellow-400">Matches</button>
-                        <button id = "rankingsBtn" class="px-3 py-1 rounded-md bg-pink-500 hover:bg-pink-600 focus:ring-2 focus:ring-pink-400">Rankings</button>                    
-                    </div>
+                    <button id="matchesBtn" class="px-3 py-1 rounded-md bg-yellow-500 hover:bg-yellow-600 focus:ring-2 focus:ring-yellow-400">Matches</button>
+                    <button id="leaderboardBtn" class="px-3 py-1 rounded-md bg-purple-500 hover:bg-purple-600 focus:ring-2 focus:ring-purple-400">Leaderboard</button>
+                </div>
                     <!-- ---------- User settings ---------- -->
                     <div class="flex items-center gap-2 ml-4 relative" id="user-menu-root">
                         <a id="user-profile-link" href="/profile" class="flex items-center gap-2 no-underline">
@@ -371,6 +375,16 @@
                 </div>
             </div>
         </section>
+        <!-- LEADERBOARD PANEL -->
+        <section id="leaderboard-panel" class="hidden w-full max-w-4xl mt-8">
+            <div class="bg-white dark:bg-gray-900 rounded-lg p-6">
+                <h3 class="text-lg font-semibold mb-3 text-purple-600">Leaderboard</h3>
+                <div id="leaderboard-list" class="space-y-3"></div>
+                <div class="mt-4">
+                    <button onclick="showSection('pong-section')" class="px-3 py-1 bg-blue-600 rounded cursor-pointer">Back</button>
+                </div>
+            </div>
+        </section>
         <!-- AUTHENTICATION PANEL -->
         <section id="authentication-panel" class="hidden w-full max-w-4xl mt-8">
             <div class="bg-white dark:bg-gray-900 rounded-lg p-6">
@@ -410,6 +424,12 @@
                     <h2 class="text-xl font-semibold mb-2 text-gray-800 dark:text-gray-100">Join a Tournament</h2>
                     <p class="text-gray-500 dark:text-gray-400 mb-4">Compete in official events and climb the leaderboard.</p>
                     <button id="viewtournamentBtn" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md">View Tournaments</button>
+                </div>
+
+                <div class="p-6 bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-lg transition">
+                    <h2 class="text-xl font-semibold mb-2 text-gray-800 dark:text-gray-100">Leaderboard</h2>
+                    <p class="text-gray-500 dark:text-gray-400 mb-4">See who’s dominating the Pong arena.</p>
+                    <button class="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded-md">View Rankings</button>
                 </div>
             </div>
             <div id="gameContainer" class="mt-8"></div>
@@ -899,6 +919,8 @@
     </script>
     <script>
         (function () {
+            const API_BASE = window.location.origin;
+
             // Elements
             const avatarPreview = document.getElementById('profile-avatar');
             const navAvatar = document.getElementById('nav-avatar');

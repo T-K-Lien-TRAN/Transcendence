@@ -1,16 +1,26 @@
 import { FastifyInstance } from "fastify";
 
 export default async function statsRoutes(fastify: FastifyInstance) {
+  const normalizeAvatar = (avatar: string | null | undefined) => {
+    if (!avatar) return "/uploads/default.png";
+    if (/^https?:\/\//i.test(avatar)) return avatar;
+    return avatar.startsWith("/uploads/") ? avatar : `/uploads/${avatar}`;
+  };
   // Leaderboard by ELO
   fastify.get("/leaderboard", async (_, reply) => {
-    const leaderboard = await fastify.db.all(`
-      SELECT U.username, S.elo, S.matches_played, S.winrate
+    const rows = await fastify.db.all(`
+      SELECT U.id, U.username, U.avatar, S.elo, S.matches_played, S.winrate
       FROM UserStats S
       JOIN User U ON U.id = S.user_id
       ORDER BY S.elo DESC
       LIMIT 20
     `);
-    reply.send(leaderboard);
+    const leaderboard = rows.map((r: any, idx: number) => ({
+      ...r,
+      rank: idx + 1,
+      avatar: normalizeAvatar(r.avatar),
+    }));
+    reply.send({ success: true, leaderboard });
   });
 
   // Get stats for specific user

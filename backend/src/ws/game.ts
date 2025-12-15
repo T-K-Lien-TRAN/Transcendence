@@ -3,6 +3,8 @@ import websocket from "@fastify/websocket";
 import { WebSocket } from "ws";
 import type { Socket as IOSocket, Server as IOServer } from "socket.io";
 
+let fastifyRef: FastifyInstance | null = null;
+
 // --------------------
 // Game matches only
 // --------------------
@@ -17,6 +19,9 @@ interface Match {
     state: GameState;
     scores: Record<string, number>;
     names: Record<number, string>;
+    ready: Set<number>;
+    started: boolean;
+    countdownTimer?: NodeJS.Timeout | null;
 }
 
 interface GameState2P {
@@ -48,7 +53,7 @@ let quadStatus: Record<number, number> = {};
 // Create Match
 // --------------------
 function createMatch(matchId: number, mode: 2 | 4, players: number[]) {
-    const baseBall = createBall();
+    const baseBall: BallState = { x: ARENA_W / 2, y: ARENA_H / 2, vx: 0, vy: 0 };
     const state: GameState = mode === 2
         ? { mode: 2, paddles: { p1: 300, p2: 300 }, ball: { ...baseBall } }
         : { mode: 4, paddles: { p1: 300, p2: 300, p3: 300, p4: 300 }, ball: { ...baseBall } };
@@ -56,9 +61,28 @@ function createMatch(matchId: number, mode: 2 | 4, players: number[]) {
         ? { p1: 0, p2: 0 }
         : { p1: 0, p2: 0, p3: 0, p4: 0 };
 
-    const match: Match = { matchId, mode, players, sockets: new Map(), ioSockets: new Map(), state, scores, names: {} };
+    const match: Match = {
+        matchId,
+        mode,
+        players,
+        sockets: new Map(),
+        ioSockets: new Map(),
+        state,
+        scores,
+        names: {},
+        ready: new Set(),
+        started: false,
+        countdownTimer: null,
+    };
     matches.set(matchId, match);
     return match;
+}
+function launchBall(ball: BallState) {
+    const fresh = createBall();
+    ball.x = fresh.x;
+    ball.y = fresh.y;
+    ball.vx = fresh.vx;
+    ball.vy = fresh.vy;
 }
 
 // --------------------
@@ -94,6 +118,7 @@ function joinQuadQueue(userId: number): number {
 // WebSocket Setup (game only)
 // --------------------
 export function setupGameWS(fastify: FastifyInstance) {
+    fastifyRef = fastify;
     fastify.register(websocket);
 
     fastify.get<{ Querystring: GameQuery }>(
@@ -171,6 +196,14 @@ export function setupGameWS(fastify: FastifyInstance) {
             return;
         }
 
+                // Ready up
+                if (data.type === "ready" && match && effectivePlayerId != null) {
+                    match.ready.add(effectivePlayerId);
+                    broadcastReady(match);
+                    tryStartCountdown(match);
+                    return;
+                }
+
                 // Paddle move for match
                 if (data.type === "paddle" && match && match.players.includes(effectivePlayerId!)) {
                     const index = match.players.indexOf(effectivePlayerId!) + 1;
@@ -188,6 +221,9 @@ export function setupGameWS(fastify: FastifyInstance) {
             socket.on("close", () => {
                 if (match && effectivePlayerId != null) {
                     match.sockets.delete(effectivePlayerId);
+                    match.ready.delete(effectivePlayerId);
+                    stopCountdown(match);
+                    broadcastReady(match);
                     // If everyone left, clean up match. Otherwise keep it alive to avoid early disconnect messages.
                     if (match.sockets.size === 0) {
                         matches.delete(match.matchId);
@@ -261,8 +297,17 @@ export function setupGameWS(fastify: FastifyInstance) {
                 }
             });
 
+            socket.on("ready", () => {
+                match.ready.add(userId);
+                broadcastReady(match);
+                tryStartCountdown(match);
+            });
+
             socket.on("disconnect", () => {
                 match.ioSockets.delete(userId);
+                match.ready.delete(userId);
+                stopCountdown(match);
+                broadcastReady(match);
                 if (match.ioSockets.size === 0 && match.sockets.size === 0) {
                     matches.delete(match.matchId);
                 }
@@ -371,6 +416,106 @@ function buildNames(match: Match) {
     return res;
 }
 
+function broadcastReady(match: Match) {
+    broadcast(match, {
+        type: "ready",
+        readyCount: match.ready.size,
+        total: match.players.length,
+        readyIds: Array.from(match.ready),
+    });
+}
+
+function stopCountdown(match: Match) {
+    if (match.countdownTimer) {
+        clearInterval(match.countdownTimer);
+        match.countdownTimer = null;
+    }
+}
+
+function tryStartCountdown(match: Match) {
+    if (match.started || match.countdownTimer) return;
+    if (match.ready.size < match.players.length) return;
+
+    let remaining = 5;
+    broadcast(match, { type: "countdown", seconds: remaining });
+    match.countdownTimer = setInterval(() => {
+        remaining -= 1;
+        if (remaining > 0) {
+            broadcast(match, { type: "countdown", seconds: remaining });
+            return;
+        }
+
+        stopCountdown(match);
+        match.started = true;
+        launchBall(match.state.ball);
+        broadcast(match, {
+            type: "start",
+            state: match.state,
+            scores: match.scores,
+            names: buildNames(match),
+        });
+    }, 1000);
+}
+
+async function recordMatch(match: Match, winnerKey: string) {
+    if (!fastifyRef) return;
+    const db = (fastifyRef as any).db;
+    if (!db) return;
+    if (match.mode !== 2) return; // handle duo for now
+    const p1 = match.players[0];
+    const p2 = match.players[1];
+    const s1 = match.scores.p1 ?? 0;
+    const s2 = match.scores.p2 ?? 0;
+    const winnerId = winnerKey === "p1" ? p1 : p2;
+
+    try {
+        // Ensure stats rows exist
+        await db.run(`INSERT OR IGNORE INTO "UserStats" (user_id) VALUES (?)`, [p1]);
+        await db.run(`INSERT OR IGNORE INTO "UserStats" (user_id) VALUES (?)`, [p2]);
+
+        // Fetch current ELOs
+        const stats1 = await db.get(`SELECT elo FROM "UserStats" WHERE user_id = ?`, [p1]);
+        const stats2 = await db.get(`SELECT elo FROM "UserStats" WHERE user_id = ?`, [p2]);
+        const elo1 = stats1?.elo ?? 1000;
+        const elo2 = stats2?.elo ?? 1000;
+
+        // Compute new ELO (K-factor 32)
+        const expected1 = 1 / (1 + Math.pow(10, (elo2 - elo1) / 400));
+        const expected2 = 1 - expected1;
+        const result1 = s1 === s2 ? 0.5 : s1 > s2 ? 1 : 0;
+        const result2 = 1 - result1;
+        const K = 32;
+        const newElo1 = Math.round(elo1 + K * (result1 - expected1));
+        const newElo2 = Math.round(elo2 + K * (result2 - expected2));
+
+        await db.run(
+            `INSERT INTO "MatchHistory" (user_id, opponent_id, user_score, opponent_score, user_elo, result) VALUES (?, ?, ?, ?, ?, ?)`,
+            [p1, p2, s1, s2, newElo1, s1 > s2 ? "win" : s1 < s2 ? "loss" : "draw"]
+        );
+        await db.run(
+            `INSERT INTO "MatchHistory" (user_id, opponent_id, user_score, opponent_score, user_elo, result) VALUES (?, ?, ?, ?, ?, ?)`,
+            [p2, p1, s2, s1, newElo2, s2 > s1 ? "win" : s2 < s1 ? "loss" : "draw"]
+        );
+
+        // Update simple stats (matches_played, winrate) if table exists
+        for (const uid of [p1, p2]) {
+            const statsRow = await db.get(`SELECT COUNT(*) as total FROM "MatchHistory" WHERE user_id = ?`, [uid]);
+            const winsRow = await db.get(`SELECT COUNT(*) as wins FROM "MatchHistory" WHERE user_id = ? AND result = 'win'`, [uid]);
+            const total = statsRow?.total || 0;
+            const wins = winsRow?.wins || 0;
+            const winrate = total > 0 ? (wins / total) * 100 : 0;
+            const elo = uid === p1 ? newElo1 : newElo2;
+            await db.run(
+                `INSERT INTO "UserStats" (user_id, matches_played, winrate, elo) VALUES (?, ?, ?, ?)
+                 ON CONFLICT(user_id) DO UPDATE SET matches_played=excluded.matches_played, winrate=excluded.winrate, elo=excluded.elo`,
+                [uid, total, winrate, elo]
+            );
+        }
+    } catch (err) {
+        fastifyRef.log.error({ err }, "Failed to record match");
+    }
+}
+
 function handleScore(match: Match, scorerKey: string) {
     match.scores[scorerKey] = (match.scores[scorerKey] || 0) + 1;
     resetBall(match.state.ball);
@@ -384,12 +529,24 @@ function handleScore(match: Match, scorerKey: string) {
 
     const reached = match.scores[scorerKey] >= WIN_SCORE;
     if (reached) {
-        broadcast(match, { type: "end", winner: scorerKey, names: buildNames(match) });
+        const names = buildNames(match);
+        broadcast(match, { type: "end", winner: scorerKey, names });
+        stopCountdown(match);
+        recordMatch(match, scorerKey);
         matches.delete(match.matchId);
     }
 }
 
 function stepPhysics(match: Match) {
+    if (!match.started) {
+        broadcast(match, {
+            type: "state",
+            state: match.state,
+            scores: match.scores,
+            names: buildNames(match),
+        });
+        return;
+    }
     const b = match.state.ball;
     b.x += b.vx * 0.016;
     b.y += b.vy * 0.016;
